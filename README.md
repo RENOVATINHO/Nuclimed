@@ -56,36 +56,5 @@ Avaliação e acompanhamento de Medicina do Estilo de Vida.
 - Plano de ação MEV com metas SMART geradas pela IA
 - Acompanhamento evolutivo do paciente
 
----
-
-## 🏗️ Arquitetura Técnica
-
-pulso/
-├── app/                    # Next.js 14 App Router
-│   ├── (auth)/             # Login e cadastro
-│   ├── (app)/              # Rotas protegidas
-│   │   ├── dashboard/      # Hub central
-│   │   ├── consulta/       # Módulo IA
-│   │   │   ├── nova/       # Nova consulta
-│   │   │   ├── [id]/       # Ver/editar consulta
-│   │   │   └── modelos/    # Templates
-│   │   ├── agenda/         # Calendário
-│   │   ├── pacientes/      # Gestão de pacientes
-│   │   ├── financeiro/     # Módulo financeiro
-│   │   ├── marketing/      # Marketing e retenção
-│   │   ├── estoque/        # Estoque
-│   │   └── mev/            # Medicina do Estilo de Vida
-│   │       ├── avaliacao/  # Questionário
-│   │       └── plano/      # Relatório e plano
-├── components/
-│   ├── ui/                 # shadcn/ui customizado
-│   ├── consulta/           # Componentes de consulta
-│   ├── agenda/             # Calendário e slots
-│   ├── financeiro/         # Gráficos e tabelas
-│   └── mev/                # Pilares, radar, scores
-├── lib/
-│   ├── ai.ts               # Serviço de IA
-│   ├── auth.ts             # NextAuth
-│   └── db.ts               # Prisma client
 └── prisma/
     └── schema.prisma
