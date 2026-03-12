@@ -8,7 +8,10 @@
       "Bash(node_modules/.bin/tsc --noEmit)",
       "Bash(wc -l \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/financeiro/page.tsx\" \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/financeiro/transacoes/page.tsx\" \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/financeiro/relatorios/page.tsx\")",
       "Bash(ls \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/marketing/\")",
-      "Bash(ls \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/estoque/\")"
+      "Bash(ls \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/estoque/\")",
+      "Bash(ls \"c:\\\\Users\\\\Polar\\\\.vscode\\\\Nuclimed\\\\app\\\\\\(app\\)\\\\mev\")",
+      "Bash(ls \"c:\\\\Users\\\\Polar\\\\.vscode\\\\Nuclimed\\\\app\\\\\\(app\\)\\\\mev\\\\avaliacao\")",
+      "Bash(ls \"c:\\\\Users\\\\Polar\\\\.vscode\\\\Nuclimed\\\\app\\\\\\(app\\)\\\\mev\\\\plano\")"
     ]
   }
 }
