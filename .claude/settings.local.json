@@ -3,7 +3,9 @@
     "allow": [
       "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir=false --import-alias=\"@/*\" --yes)",
       "Read(//c/Users/guilh/Desktop/Nuclimed/**)",
-      "Bash(npx create-next-app@latest nuclimed --typescript --tailwind --eslint --app --src-dir=false --import-alias=\"@/*\" --yes)"
+      "Bash(npx create-next-app@latest nuclimed --typescript --tailwind --eslint --app --src-dir=false --import-alias=\"@/*\" --yes)",
+      "Bash(npx tsc:*)",
+      "Bash(node_modules/.bin/tsc --noEmit)"
     ]
   }
 }
