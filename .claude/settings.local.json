@@ -5,7 +5,8 @@
       "Read(//c/Users/guilh/Desktop/Nuclimed/**)",
       "Bash(npx create-next-app@latest nuclimed --typescript --tailwind --eslint --app --src-dir=false --import-alias=\"@/*\" --yes)",
       "Bash(npx tsc:*)",
-      "Bash(node_modules/.bin/tsc --noEmit)"
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(wc -l \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/financeiro/page.tsx\" \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/financeiro/transacoes/page.tsx\" \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/financeiro/relatorios/page.tsx\")"
     ]
   }
 }
