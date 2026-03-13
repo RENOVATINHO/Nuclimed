@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -36,6 +36,15 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/use-toast";
+import {
+  getAgendamentos,
+  getResumoAgenda,
+  criarAgendamento,
+  atualizarStatusAgendamento,
+  type AgendamentoComPaciente,
+} from "@/lib/actions/agenda";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -43,10 +52,12 @@ type StatusAgendamento = "agendado" | "finalizado" | "cancelado" | "retorno" | "
 type TipoConsulta = "Consulta" | "Retorno" | "Procedimento" | "Cirurgia" | "Exame";
 type ViewMode = "dia" | "semana" | "mes";
 
+// Internal display type mapped from server data
 interface Agendamento {
   id: string;
   paciente: string;
   pacienteAbrev: string;
+  pacienteId: string;
   tipo: TipoConsulta;
   status: StatusAgendamento;
   data: string; // YYYY-MM-DD
@@ -57,8 +68,18 @@ interface Agendamento {
   observacoes?: string;
 }
 
+interface ResumoAgenda {
+  agendados: number;
+  finalizados: number;
+  cancelados: number;
+  retornos: number;
+  espera: number;
+  total: number;
+}
+
 interface NovoAgendamentoData {
   paciente: string;
+  pacienteId: string;
   data: string;
   hora: string;
   tipo: string;
@@ -134,43 +155,6 @@ const PACIENTES_MOCK = [
   "Thiago Mendes", "Vanessa Albuquerque", "Roberto Alves Lima",
 ];
 
-// ─── Mock data ───────────────────────────────────────────────────────────────
-
-const TODAY_DATE = new Date(2026, 2, 12); // 12 março 2026
-
-const AGENDAMENTOS_MOCK: Agendamento[] = [
-  // Segunda 9/mar
-  { id: "1", paciente: "Ana Paula Ferreira", pacienteAbrev: "Ana P.", tipo: "Consulta", status: "finalizado", data: "2026-03-09", horaInicio: "08:00", duracao: 30, convenio: "Unimed", valor: 150 },
-  { id: "2", paciente: "Carlos Eduardo Santos", pacienteAbrev: "Carlos E.", tipo: "Retorno", status: "finalizado", data: "2026-03-09", horaInicio: "09:00", duracao: 30, convenio: "Bradesco Saúde", valor: 80 },
-  { id: "3", paciente: "Felipe Souza Martins", pacienteAbrev: "Felipe S.", tipo: "Consulta", status: "finalizado", data: "2026-03-09", horaInicio: "11:00", duracao: 45, convenio: "Particular", valor: 250 },
-  // Terça 10/mar
-  { id: "4", paciente: "Mariana Costa Oliveira", pacienteAbrev: "Mariana C.", tipo: "Consulta", status: "finalizado", data: "2026-03-10", horaInicio: "08:30", duracao: 45, convenio: "Particular", valor: 250 },
-  { id: "5", paciente: "Roberto Alves Lima", pacienteAbrev: "Roberto A.", tipo: "Exame", status: "cancelado", data: "2026-03-10", horaInicio: "10:00", duracao: 30, convenio: "Amil", valor: 120 },
-  { id: "6", paciente: "Sandra Pereira Lima", pacienteAbrev: "Sandra P.", tipo: "Retorno", status: "finalizado", data: "2026-03-10", horaInicio: "14:00", duracao: 30, convenio: "Unimed", valor: 80 },
-  // Quarta 11/mar
-  { id: "7", paciente: "Juliana Mendes Costa", pacienteAbrev: "Juliana M.", tipo: "Procedimento", status: "finalizado", data: "2026-03-11", horaInicio: "07:30", duracao: 60, convenio: "Unimed", valor: 350 },
-  { id: "8", paciente: "Pedro Henrique Rocha", pacienteAbrev: "Pedro H.", tipo: "Consulta", status: "finalizado", data: "2026-03-11", horaInicio: "09:30", duracao: 30, convenio: "SulAmérica", valor: 180 },
-  { id: "9", paciente: "Tatiana Borges", pacienteAbrev: "Tatiana B.", tipo: "Consulta", status: "cancelado", data: "2026-03-11", horaInicio: "11:00", duracao: 30, convenio: "Particular", valor: 200 },
-  // Quinta 12/mar (hoje)
-  { id: "10", paciente: "Fernanda Lima Sousa", pacienteAbrev: "Fernanda L.", tipo: "Consulta", status: "espera", data: "2026-03-12", horaInicio: "08:00", duracao: 30, convenio: "Particular", valor: 200 },
-  { id: "11", paciente: "Gabriel Torres Melo", pacienteAbrev: "Gabriel T.", tipo: "Retorno", status: "espera", data: "2026-03-12", horaInicio: "09:00", duracao: 30, convenio: "Unimed", valor: 80 },
-  { id: "12", paciente: "Beatriz Nascimento", pacienteAbrev: "Beatriz N.", tipo: "Consulta", status: "agendado", data: "2026-03-12", horaInicio: "10:30", duracao: 45, convenio: "Bradesco Saúde", valor: 200 },
-  { id: "13", paciente: "Lucas Ferreira Dias", pacienteAbrev: "Lucas F.", tipo: "Exame", status: "agendado", data: "2026-03-12", horaInicio: "14:00", duracao: 30, convenio: "Amil", valor: 150 },
-  { id: "14", paciente: "Amanda Vieira Nunes", pacienteAbrev: "Amanda V.", tipo: "Consulta", status: "agendado", data: "2026-03-12", horaInicio: "15:30", duracao: 30, convenio: "SulAmérica", valor: 200 },
-  // Sexta 13/mar
-  { id: "15", paciente: "Camila Oliveira Santos", pacienteAbrev: "Camila O.", tipo: "Cirurgia", status: "agendado", data: "2026-03-13", horaInicio: "07:00", duracao: 120, convenio: "Unimed", valor: 2500 },
-  { id: "16", paciente: "Rafael Gomes Pereira", pacienteAbrev: "Rafael G.", tipo: "Consulta", status: "agendado", data: "2026-03-13", horaInicio: "11:00", duracao: 30, convenio: "Particular", valor: 200 },
-  { id: "17", paciente: "Isabela Castro Freitas", pacienteAbrev: "Isabela C.", tipo: "Retorno", status: "agendado", data: "2026-03-13", horaInicio: "14:30", duracao: 30, convenio: "Bradesco Saúde", valor: 80 },
-  // Sábado 14/mar
-  { id: "18", paciente: "Natalia Barbosa Cruz", pacienteAbrev: "Natalia B.", tipo: "Retorno", status: "agendado", data: "2026-03-14", horaInicio: "08:00", duracao: 30, convenio: "SulAmérica", valor: 100 },
-  { id: "19", paciente: "Diego Monteiro Silva", pacienteAbrev: "Diego M.", tipo: "Consulta", status: "agendado", data: "2026-03-14", horaInicio: "09:30", duracao: 45, convenio: "Particular", valor: 250 },
-];
-
-const SALA_ESPERA_MOCK = [
-  { id: "10", paciente: "Fernanda L.", espera: 8 },
-  { id: "11", paciente: "Gabriel T.", espera: 23 },
-];
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getWeekDates(ref: Date): Date[] {
@@ -226,6 +210,37 @@ function endTime(horaInicio: string, duracao: number): string {
 
 function initials(name: string): string {
   return name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
+}
+
+/** Map server AgendamentoComPaciente → local Agendamento display type */
+function mapAgendamento(a: AgendamentoComPaciente): Agendamento {
+  const dt = new Date(a.dataHora);
+  const data = formatDateKey(dt);
+  const horaInicio = `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`;
+  const rawStatus = a.status.toLowerCase() as StatusAgendamento;
+  const status: StatusAgendamento =
+    rawStatus === "agendado" || rawStatus === "finalizado" || rawStatus === "cancelado" ||
+    rawStatus === "retorno" || rawStatus === "espera"
+      ? rawStatus
+      : "agendado";
+  const nomePartes = a.paciente.nome.split(" ");
+  const pacienteAbrev = nomePartes.length >= 2
+    ? `${nomePartes[0]} ${nomePartes[1][0]}.`
+    : nomePartes[0];
+  return {
+    id: a.id,
+    paciente: a.paciente.nome,
+    pacienteAbrev,
+    pacienteId: a.paciente.id,
+    tipo: (a.tipo as TipoConsulta) || "Consulta",
+    status,
+    data,
+    horaInicio,
+    duracao: a.duracao,
+    convenio: a.convenio ?? undefined,
+    valor: a.valor ?? undefined,
+    observacoes: a.observacoes ?? undefined,
+  };
 }
 
 // ─── MiniCalendário ───────────────────────────────────────────────────────────
@@ -313,15 +328,20 @@ function NovoAgendamentoModal({
   onOpenChange,
   initialDate,
   initialHora,
+  onSuccess,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   initialDate?: string;
   initialHora?: string;
+  onSuccess: () => void;
 }) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<NovoAgendamentoData>({
     paciente: "",
-    data: initialDate || formatDateKey(TODAY_DATE),
+    pacienteId: "",
+    data: initialDate || formatDateKey(new Date()),
     hora: initialHora || "09:00",
     tipo: "",
     convenio: "",
@@ -335,7 +355,8 @@ function NovoAgendamentoModal({
     if (v) {
       setForm({
         paciente: "",
-        data: initialDate || formatDateKey(TODAY_DATE),
+        pacienteId: "",
+        data: initialDate || formatDateKey(new Date()),
         hora: initialHora || "09:00",
         tipo: "",
         convenio: "",
@@ -350,6 +371,31 @@ function NovoAgendamentoModal({
   const sugestoes = busca.length > 1
     ? PACIENTES_MOCK.filter(p => p.toLowerCase().includes(busca.toLowerCase()))
     : [];
+
+  const handleSubmit = async () => {
+    if (!form.paciente || !form.tipo) return;
+    setSaving(true);
+    try {
+      const dataHora = `${form.data}T${form.hora}:00`;
+      // Note: criarAgendamento requires a real pacienteId from DB.
+      // For now we pass pacienteId from form (would be populated via real patient search).
+      await criarAgendamento({
+        pacienteId: form.pacienteId || form.paciente, // fallback: name used as ID placeholder
+        dataHora,
+        duracao: Number(form.duracao),
+        tipo: form.tipo,
+        convenio: form.convenio || undefined,
+        observacoes: form.observacoes || undefined,
+      });
+      toast({ title: "Agendamento criado com sucesso!" });
+      handleOpenChange(false);
+      onSuccess();
+    } catch {
+      toast({ title: "Erro ao criar agendamento", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -373,7 +419,7 @@ function NovoAgendamentoModal({
                 value={form.paciente || busca}
                 onChange={(e) => {
                   setBusca(e.target.value);
-                  setForm(f => ({ ...f, paciente: "" }));
+                  setForm(f => ({ ...f, paciente: "", pacienteId: "" }));
                 }}
               />
               {sugestoes.length > 0 && (
@@ -383,7 +429,7 @@ function NovoAgendamentoModal({
                       key={p}
                       className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
                       onClick={() => {
-                        setForm(f => ({ ...f, paciente: p }));
+                        setForm(f => ({ ...f, paciente: p, pacienteId: p }));
                         setBusca("");
                       }}
                     >
@@ -480,16 +526,16 @@ function NovoAgendamentoModal({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={saving}>
             Cancelar
           </Button>
           <Button
             className="bg-violet-600 hover:bg-violet-700"
-            disabled={!form.paciente || !form.tipo}
-            onClick={() => handleOpenChange(false)}
+            disabled={!form.paciente || !form.tipo || saving}
+            onClick={handleSubmit}
           >
             <Calendar className="w-4 h-4 mr-2" />
-            Agendar
+            {saving ? "Agendando..." : "Agendar"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -502,11 +548,21 @@ function NovoAgendamentoModal({
 function DetalhesSidebar({
   agendamento,
   onClose,
+  onStatusChange,
 }: {
   agendamento: Agendamento;
   onClose: () => void;
+  onStatusChange: (id: string, status: string) => Promise<void>;
 }) {
   const cfg = STATUS_CONFIG[agendamento.status];
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const handleStatus = async (status: string) => {
+    setActionLoading(true);
+    await onStatusChange(agendamento.id, status);
+    setActionLoading(false);
+    onClose();
+  };
 
   return (
     <div className="fixed right-0 top-0 h-full w-80 bg-white border-l shadow-xl z-40 flex flex-col">
@@ -593,6 +649,8 @@ function DetalhesSidebar({
               variant="outline"
               size="sm"
               className="text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+              disabled={actionLoading}
+              onClick={() => handleStatus("FINALIZADO")}
             >
               <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
               Finalizar
@@ -604,6 +662,8 @@ function DetalhesSidebar({
             variant="outline"
             size="sm"
             className="w-full text-xs text-red-500 border-red-200 hover:bg-red-50"
+            disabled={actionLoading}
+            onClick={() => handleStatus("CANCELADO")}
           >
             <XCircle className="w-3.5 h-3.5 mr-1.5" />
             Cancelar consulta
@@ -617,34 +677,70 @@ function DetalhesSidebar({
 // ─── AgendaPage ───────────────────────────────────────────────────────────────
 
 export default function AgendaPage() {
+  const { toast } = useToast();
   const [viewMode, setViewMode] = useState<ViewMode>("semana");
-  const [currentDate, setCurrentDate] = useState(TODAY_DATE);
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [multiprofissional, setMultiprofissional] = useState(false);
   const [selectedAgendamento, setSelectedAgendamento] = useState<Agendamento | null>(null);
   const [modalNovoAberto, setModalNovoAberto] = useState(false);
   const [slotInicial, setSlotInicial] = useState<{ data: string; hora: string } | undefined>();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
+  // ── Server data state ───────────────────────────────────────────────────────
+  const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
+  const [loadingAgendamentos, setLoadingAgendamentos] = useState(true);
+  const [resumo, setResumo] = useState<ResumoAgenda | null>(null);
+  const [loadingResumo, setLoadingResumo] = useState(true);
+
   const weekDates = useMemo(() => getWeekDates(currentDate), [currentDate]);
 
+  // ── Fetch agendamentos for the current week ────────────────────────────────
+  const fetchAgendamentos = useCallback(async () => {
+    setLoadingAgendamentos(true);
+    const dataInicio = weekDates[0];
+    const dataInicioBOD = new Date(dataInicio);
+    dataInicioBOD.setHours(0, 0, 0, 0);
+    const dataFim = weekDates[weekDates.length - 1];
+    const dataFimEOD = new Date(dataFim);
+    dataFimEOD.setHours(23, 59, 59, 999);
+    getAgendamentos(dataInicioBOD, dataFimEOD)
+      .then((data) => setAgendamentos(data.map(mapAgendamento)))
+      .catch(() => toast({ title: "Erro ao carregar agendamentos", variant: "destructive" }))
+      .finally(() => setLoadingAgendamentos(false));
+  }, [weekDates, toast]);
+
+  // ── Fetch resumo for today ─────────────────────────────────────────────────
+  const fetchResumo = useCallback(async () => {
+    setLoadingResumo(true);
+    getResumoAgenda()
+      .then(setResumo)
+      .catch(() => toast({ title: "Erro ao carregar resumo", variant: "destructive" }))
+      .finally(() => setLoadingResumo(false));
+  }, [toast]);
+
+  useEffect(() => {
+    fetchAgendamentos();
+  }, [fetchAgendamentos]);
+
+  useEffect(() => {
+    fetchResumo();
+  }, [fetchResumo]);
+
+  // ── Derived data ───────────────────────────────────────────────────────────
   const agendamentosPorDia = useMemo(() => {
     const map = new Map<string, Agendamento[]>();
     weekDates.forEach((d) => {
       const key = formatDateKey(d);
-      map.set(key, AGENDAMENTOS_MOCK.filter((a) => a.data === key));
+      map.set(key, agendamentos.filter((a) => a.data === key));
     });
     return map;
-  }, [weekDates]);
+  }, [weekDates, agendamentos]);
 
-  const resumoDia = useMemo(() => {
-    const ags = AGENDAMENTOS_MOCK.filter((a) => a.data === formatDateKey(currentDate));
-    return {
-      agendados: ags.filter((a) => a.status === "agendado").length,
-      finalizados: ags.filter((a) => a.status === "finalizado").length,
-      cancelados: ags.filter((a) => a.status === "cancelado").length,
-      retornos: ags.filter((a) => a.status === "retorno" || a.tipo === "Retorno").length,
-    };
-  }, [currentDate]);
+  // Waiting room: agendamentos with status "espera" for today
+  const salaEspera = useMemo(() => {
+    const todayKey = formatDateKey(new Date());
+    return agendamentos.filter((a) => a.data === todayKey && a.status === "espera");
+  }, [agendamentos]);
 
   const navigateWeek = (dir: -1 | 1) => {
     const d = new Date(currentDate);
@@ -658,6 +754,17 @@ export default function AgendaPage() {
       hora: `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`,
     });
     setModalNovoAberto(true);
+  };
+
+  const handleStatusChange = async (id: string, status: string) => {
+    try {
+      await atualizarStatusAgendamento(id, status);
+      toast({ title: "Status atualizado com sucesso!" });
+      fetchAgendamentos();
+      fetchResumo();
+    } catch {
+      toast({ title: "Erro ao atualizar status", variant: "destructive" });
+    }
   };
 
   return (
@@ -753,24 +860,32 @@ export default function AgendaPage() {
             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2.5">
               Resumo do dia
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-blue-50 rounded-lg p-2.5 border border-blue-100">
-                <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wide">Agendados</p>
-                <p className="text-2xl font-bold text-blue-700 mt-0.5 leading-none">{resumoDia.agendados}</p>
+            {loadingResumo ? (
+              <div className="grid grid-cols-2 gap-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-14 rounded-lg" />
+                ))}
               </div>
-              <div className="bg-emerald-50 rounded-lg p-2.5 border border-emerald-100">
-                <p className="text-[10px] font-semibold text-emerald-500 uppercase tracking-wide">Finalizados</p>
-                <p className="text-2xl font-bold text-emerald-700 mt-0.5 leading-none">{resumoDia.finalizados}</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-blue-50 rounded-lg p-2.5 border border-blue-100">
+                  <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wide">Agendados</p>
+                  <p className="text-2xl font-bold text-blue-700 mt-0.5 leading-none">{resumo?.agendados ?? 0}</p>
+                </div>
+                <div className="bg-emerald-50 rounded-lg p-2.5 border border-emerald-100">
+                  <p className="text-[10px] font-semibold text-emerald-500 uppercase tracking-wide">Finalizados</p>
+                  <p className="text-2xl font-bold text-emerald-700 mt-0.5 leading-none">{resumo?.finalizados ?? 0}</p>
+                </div>
+                <div className="bg-red-50 rounded-lg p-2.5 border border-red-100">
+                  <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide">Cancelados</p>
+                  <p className="text-2xl font-bold text-red-600 mt-0.5 leading-none">{resumo?.cancelados ?? 0}</p>
+                </div>
+                <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
+                  <p className="text-[10px] font-semibold text-amber-500 uppercase tracking-wide">Retornos</p>
+                  <p className="text-2xl font-bold text-amber-700 mt-0.5 leading-none">{resumo?.retornos ?? 0}</p>
+                </div>
               </div>
-              <div className="bg-red-50 rounded-lg p-2.5 border border-red-100">
-                <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide">Cancelados</p>
-                <p className="text-2xl font-bold text-red-600 mt-0.5 leading-none">{resumoDia.cancelados}</p>
-              </div>
-              <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
-                <p className="text-[10px] font-semibold text-amber-500 uppercase tracking-wide">Retornos</p>
-                <p className="text-2xl font-bold text-amber-700 mt-0.5 leading-none">{resumoDia.retornos}</p>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Waiting room */}
@@ -780,29 +895,26 @@ export default function AgendaPage() {
                 Sala de espera
               </p>
               <span className="w-4 h-4 rounded-full bg-orange-100 text-orange-700 text-[10px] font-bold flex items-center justify-center">
-                {SALA_ESPERA_MOCK.length}
+                {salaEspera.length}
               </span>
             </div>
             <div className="space-y-2">
-              {SALA_ESPERA_MOCK.length === 0 ? (
+              {salaEspera.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-3">Nenhum paciente aguardando</p>
               ) : (
-                SALA_ESPERA_MOCK.map((p) => (
+                salaEspera.map((ag) => (
                   <div
-                    key={p.id}
+                    key={ag.id}
                     className="flex items-center gap-2 p-2.5 rounded-lg bg-orange-50 border border-orange-100 cursor-pointer hover:border-orange-300 transition-colors"
-                    onClick={() => {
-                      const ag = AGENDAMENTOS_MOCK.find((a) => a.id === p.id);
-                      if (ag) setSelectedAgendamento(ag);
-                    }}
+                    onClick={() => setSelectedAgendamento(ag)}
                   >
                     <div className="w-7 h-7 rounded-full bg-orange-200 flex items-center justify-center text-orange-800 text-[10px] font-bold shrink-0">
-                      {p.paciente.split(" ").map(n => n[0]).slice(0, 2).join("")}
+                      {initials(ag.pacienteAbrev)}
                     </div>
-                    <p className="flex-1 text-xs font-medium text-slate-800 truncate">{p.paciente}</p>
+                    <p className="flex-1 text-xs font-medium text-slate-800 truncate">{ag.pacienteAbrev}</p>
                     <div className="flex items-center gap-1 text-orange-600 shrink-0">
                       <Timer className="w-3 h-3" />
-                      <span className="text-[10px] font-semibold">{p.espera}m</span>
+                      <span className="text-[10px] font-semibold">—</span>
                     </div>
                   </div>
                 ))
@@ -884,6 +996,19 @@ export default function AgendaPage() {
                   )}
                   style={{ height: TOTAL_SLOTS * SLOT_HEIGHT }}
                 >
+                  {/* Loading skeleton overlay */}
+                  {loadingAgendamentos && (
+                    <div className="absolute inset-0 z-10 flex flex-col gap-2 p-2 pointer-events-none">
+                      {Array.from({ length: 3 }).map((_, i) => (
+                        <Skeleton
+                          key={i}
+                          className="w-full rounded-md"
+                          style={{ height: SLOT_HEIGHT * 1.5, marginTop: i * SLOT_HEIGHT * 2 }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
                   {/* Slot lines + click targets */}
                   {Array.from({ length: TOTAL_SLOTS }, (_, i) => {
                     const total = HORA_INICIO * 60 + i * 30;
@@ -908,7 +1033,7 @@ export default function AgendaPage() {
                   })}
 
                   {/* Appointment cards */}
-                  {dayAgs.map((ag: Agendamento) => {
+                  {!loadingAgendamentos && dayAgs.map((ag: Agendamento) => {
                     const cfg = STATUS_CONFIG[ag.status];
                     const startMins = timeToMinutes(ag.horaInicio);
                     const top = minutesToTop(startMins);
@@ -1003,6 +1128,7 @@ export default function AgendaPage() {
           <DetalhesSidebar
             agendamento={selectedAgendamento}
             onClose={() => setSelectedAgendamento(null)}
+            onStatusChange={handleStatusChange}
           />
         </>
       )}
@@ -1013,6 +1139,7 @@ export default function AgendaPage() {
         onOpenChange={setModalNovoAberto}
         initialDate={slotInicial?.data}
         initialHora={slotInicial?.hora}
+        onSuccess={() => { fetchAgendamentos(); fetchResumo(); }}
       />
     </div>
   );

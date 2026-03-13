@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Plus,
   Download,
@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -39,26 +40,13 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/use-toast";
+import { getTransacoes, criarTransacao, TransacaoComPaciente } from "@/lib/actions/financeiro";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type StatusTransacao = "pago" | "pendente" | "cancelado";
 type TipoTransacao = "receita" | "despesa";
-
-interface Transacao {
-  id: string;
-  data: string;
-  paciente: string;
-  descricao: string;
-  categoria: string;
-  convenio: string;
-  valorBruto: number;
-  desconto: number;
-  valorLiquido: number;
-  status: StatusTransacao;
-  tipo: TipoTransacao;
-  formaPagamento: string;
-}
 
 interface ContaBancaria {
   nome: string;
@@ -88,36 +76,35 @@ const CONTAS_BANCARIAS: ContaBancaria[] = [
   { nome: "CDB Curto Prazo", banco: "XP Investimentos", saldo: 45000.00, tipo: "investimento" },
 ];
 
-// ─── Mock Transactions ────────────────────────────────────────────────────────
-
-const MOCK_TRANSACOES: Transacao[] = [
-  { id: "1", data: "12/03/2026", paciente: "Fernanda Lima Sousa", descricao: "Consulta clínica", categoria: "Consultas", convenio: "Particular", valorBruto: 200, desconto: 0, valorLiquido: 200, status: "pago", tipo: "receita", formaPagamento: "PIX" },
-  { id: "2", data: "12/03/2026", paciente: "Gabriel Torres Melo", descricao: "Retorno", categoria: "Retornos", convenio: "Unimed", valorBruto: 100, desconto: 20, valorLiquido: 80, status: "pendente", tipo: "receita", formaPagamento: "Convênio" },
-  { id: "3", data: "12/03/2026", paciente: "—", descricao: "Material cirúrgico", categoria: "Material", convenio: "—", valorBruto: 320, desconto: 0, valorLiquido: 320, status: "pago", tipo: "despesa", formaPagamento: "Cartão de crédito" },
-  { id: "4", data: "11/03/2026", paciente: "Pedro Henrique Rocha", descricao: "Consulta clínica", categoria: "Consultas", convenio: "SulAmérica", valorBruto: 200, desconto: 20, valorLiquido: 180, status: "pago", tipo: "receita", formaPagamento: "Convênio" },
-  { id: "5", data: "11/03/2026", paciente: "Juliana Mendes Costa", descricao: "Procedimento ambulatorial", categoria: "Procedimentos", convenio: "Unimed", valorBruto: 400, desconto: 50, valorLiquido: 350, status: "pago", tipo: "receita", formaPagamento: "Convênio" },
-  { id: "6", data: "10/03/2026", paciente: "—", descricao: "Aluguel sala clínica", categoria: "Aluguel", convenio: "—", valorBruto: 3200, desconto: 0, valorLiquido: 3200, status: "pago", tipo: "despesa", formaPagamento: "Boleto" },
-  { id: "7", data: "10/03/2026", paciente: "Mariana Costa Oliveira", descricao: "Consulta clínica", categoria: "Consultas", convenio: "Particular", valorBruto: 250, desconto: 0, valorLiquido: 250, status: "pago", tipo: "receita", formaPagamento: "Dinheiro" },
-  { id: "8", data: "09/03/2026", paciente: "—", descricao: "Salário secretária", categoria: "Salários", convenio: "—", valorBruto: 1800, desconto: 0, valorLiquido: 1800, status: "pago", tipo: "despesa", formaPagamento: "PIX" },
-  { id: "9", data: "09/03/2026", paciente: "Ana Paula Ferreira", descricao: "Retorno", categoria: "Retornos", convenio: "Bradesco Saúde", valorBruto: 100, desconto: 20, valorLiquido: 80, status: "pago", tipo: "receita", formaPagamento: "Convênio" },
-  { id: "10", data: "09/03/2026", paciente: "Carlos Eduardo Santos", descricao: "Consulta clínica", categoria: "Consultas", convenio: "Amil", valorBruto: 200, desconto: 0, valorLiquido: 200, status: "cancelado", tipo: "receita", formaPagamento: "Convênio" },
-  { id: "11", data: "08/03/2026", paciente: "Beatriz Nascimento", descricao: "Exame laboratorial", categoria: "Exames", convenio: "Unimed", valorBruto: 180, desconto: 30, valorLiquido: 150, status: "pago", tipo: "receita", formaPagamento: "Convênio" },
-  { id: "12", data: "08/03/2026", paciente: "—", descricao: "Conta de energia", categoria: "Serviços", convenio: "—", valorBruto: 480, desconto: 0, valorLiquido: 480, status: "pendente", tipo: "despesa", formaPagamento: "Boleto" },
-  { id: "13", data: "07/03/2026", paciente: "Lucas Ferreira Dias", descricao: "Procedimento cirúrgico", categoria: "Cirurgias", convenio: "Particular", valorBruto: 2500, desconto: 0, valorLiquido: 2500, status: "pago", tipo: "receita", formaPagamento: "Cartão de crédito" },
-  { id: "14", data: "07/03/2026", paciente: "—", descricao: "Manutenção equipamento", categoria: "Equipamentos", convenio: "—", valorBruto: 650, desconto: 0, valorLiquido: 650, status: "pago", tipo: "despesa", formaPagamento: "PIX" },
-  { id: "15", data: "06/03/2026", paciente: "Natalia Barbosa", descricao: "Retorno", categoria: "Retornos", convenio: "SulAmérica", valorBruto: 100, desconto: 20, valorLiquido: 80, status: "pendente", tipo: "receita", formaPagamento: "Convênio" },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function moeda(valor: number): string {
   return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function normalizeStatus(s: string): StatusTransacao {
+  const map: Record<string, StatusTransacao> = { PAGO: "pago", PENDENTE: "pendente", CANCELADO: "cancelado" };
+  return map[s.toUpperCase()] ?? "pendente";
+}
+
+function normalizeTipo(t: string): TipoTransacao {
+  return t.toUpperCase() === "RECEITA" ? "receita" : "despesa";
+}
+
 // ─── Nova Transação Modal ─────────────────────────────────────────────────────
 
-function NovaTransacaoModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function NovaTransacaoModal({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCreated: () => void;
+}) {
+  const { toast } = useToast();
   const [tipoForm, setTipoForm] = useState<TipoTransacao>("receita");
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     paciente: "",
     descricao: "",
@@ -132,8 +119,31 @@ function NovaTransacaoModal({ open, onOpenChange }: { open: boolean; onOpenChang
   });
 
   const categorias = tipoForm === "receita" ? CATEGORIAS_RECEITA : CATEGORIAS_DESPESA;
-
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  async function handleSubmit() {
+    setSaving(true);
+    try {
+      await criarTransacao({
+        descricao: form.descricao,
+        categoria: form.categoria,
+        tipo: tipoForm === "receita" ? "RECEITA" : "DESPESA",
+        valor: parseFloat(form.valor) || 0,
+        desconto: parseFloat(form.desconto) || 0,
+        formaPagamento: form.formaPagamento,
+        dataEmissao: form.dataEmissao,
+        dataBaixa: form.dataPagamento || undefined,
+        observacoes: form.observacoes || undefined,
+      });
+      toast({ title: "Transação criada com sucesso" });
+      onCreated();
+      onOpenChange(false);
+    } catch {
+      toast({ title: "Erro ao salvar transação", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -257,11 +267,11 @@ function NovaTransacaoModal({ open, onOpenChange }: { open: boolean; onOpenChang
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
           <Button
             className={cn(tipoForm === "receita" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-500 hover:bg-red-600")}
-            disabled={!form.descricao || !form.valor || !form.formaPagamento}
-            onClick={() => onOpenChange(false)}
+            disabled={!form.descricao || !form.valor || !form.formaPagamento || saving}
+            onClick={handleSubmit}
           >
             <Receipt className="w-4 h-4 mr-2" />
-            Registrar {tipoForm === "receita" ? "receita" : "despesa"}
+            {saving ? "Salvando..." : `Registrar ${tipoForm === "receita" ? "receita" : "despesa"}`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -272,6 +282,7 @@ function NovaTransacaoModal({ open, onOpenChange }: { open: boolean; onOpenChang
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function TransacoesPage() {
+  const { toast } = useToast();
   const [busca, setBusca] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("todos");
   const [filtroCategoria, setFiltroCategoria] = useState("todos");
@@ -283,25 +294,41 @@ export default function TransacoesPage() {
   const [sidebarAberta, setSidebarAberta] = useState(true);
   const [modalAberto, setModalAberto] = useState(false);
 
-  const filtradas = useMemo(() => {
-    return MOCK_TRANSACOES.filter((t) => {
-      const matchBusca = !busca || t.paciente.toLowerCase().includes(busca.toLowerCase()) || t.descricao.toLowerCase().includes(busca.toLowerCase());
-      const matchTipo = filtroTipo === "todos" || t.tipo === filtroTipo;
-      const matchCat = filtroCategoria === "todos" || t.categoria === filtroCategoria;
-      const matchStatus = filtroStatus === "todos" || t.status === filtroStatus;
-      const matchConvenio = filtroConvenio === "todos" || t.convenio === filtroConvenio;
-      return matchBusca && matchTipo && matchCat && matchStatus && matchConvenio;
-    });
-  }, [busca, filtroTipo, filtroCategoria, filtroStatus, filtroConvenio]);
+  const [transacoes, setTransacoes] = useState<TransacaoComPaciente[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPaginas, setTotalPaginas] = useState(1);
+  const [totais, setTotais] = useState({ receitas: 0, despesas: 0, saldo: 0 });
+  const [loading, setLoading] = useState(true);
 
-  const totalPaginas = Math.ceil(filtradas.length / ITEMS_POR_PAGINA);
-  const paginadas = filtradas.slice((pagina - 1) * ITEMS_POR_PAGINA, pagina * ITEMS_POR_PAGINA);
-
-  const totalReceitas = filtradas.filter(t => t.tipo === "receita").reduce((s, t) => s + t.valorLiquido, 0);
-  const totalDespesas = filtradas.filter(t => t.tipo === "despesa").reduce((s, t) => s + t.valorLiquido, 0);
   const saldoTotal = CONTAS_BANCARIAS.reduce((s, c) => s + c.saldo, 0);
 
-  const todasCategorias = [...new Set(MOCK_TRANSACOES.map(t => t.categoria))].sort();
+  const fetchTransacoes = useCallback(() => {
+    setLoading(true);
+    getTransacoes({
+      tipo: filtroTipo !== "todos" ? filtroTipo.toUpperCase() : undefined,
+      categoria: filtroCategoria !== "todos" ? filtroCategoria : undefined,
+      status: filtroStatus !== "todos" ? filtroStatus.toUpperCase() : undefined,
+      dataInicio: dataInicio || undefined,
+      dataFim: dataFim || undefined,
+      busca: busca || undefined,
+      page: pagina,
+      limit: ITEMS_POR_PAGINA,
+    })
+      .then((result) => {
+        setTransacoes(result.transacoes);
+        setTotal(result.total);
+        setTotalPaginas(result.pages);
+        setTotais(result.totais);
+      })
+      .catch(() => toast({ title: "Erro ao carregar transações", variant: "destructive" }))
+      .finally(() => setLoading(false));
+  }, [busca, filtroTipo, filtroCategoria, filtroStatus, filtroConvenio, dataInicio, dataFim, pagina]);
+
+  useEffect(() => {
+    fetchTransacoes();
+  }, [fetchTransacoes]);
+
+  const todasCategorias = [...CATEGORIAS_RECEITA, ...CATEGORIAS_DESPESA].sort();
 
   return (
     <div className="flex gap-4 -m-6 h-[calc(100vh-4rem)]">
@@ -313,7 +340,7 @@ export default function TransacoesPage() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Transações</h1>
-            <p className="text-sm text-slate-400 mt-0.5">{filtradas.length} transações encontradas</p>
+            <p className="text-sm text-slate-400 mt-0.5">{total} transações encontradas</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
@@ -349,9 +376,9 @@ export default function TransacoesPage() {
             {/* Período */}
             <div className="flex items-center gap-1 bg-slate-50 border rounded-lg px-2 h-8">
               <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <Input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="border-0 p-0 h-auto text-xs w-28 focus-visible:ring-0 shadow-none bg-transparent" />
+              <Input type="date" value={dataInicio} onChange={(e) => { setDataInicio(e.target.value); setPagina(1); }} className="border-0 p-0 h-auto text-xs w-28 focus-visible:ring-0 shadow-none bg-transparent" />
               <span className="text-slate-300 text-xs">–</span>
-              <Input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="border-0 p-0 h-auto text-xs w-28 focus-visible:ring-0 shadow-none bg-transparent" />
+              <Input type="date" value={dataFim} onChange={(e) => { setDataFim(e.target.value); setPagina(1); }} className="border-0 p-0 h-auto text-xs w-28 focus-visible:ring-0 shadow-none bg-transparent" />
             </div>
             {/* Tipo */}
             <Select value={filtroTipo} onValueChange={(v) => { setFiltroTipo(v); setPagina(1); }}>
@@ -415,31 +442,45 @@ export default function TransacoesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {paginadas.length === 0 ? (
+                {loading ? (
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i}>
+                      {Array.from({ length: 10 }).map((_, j) => (
+                        <td key={j} className="px-3 py-3">
+                          <Skeleton className="h-4 w-full" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                ) : transacoes.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="py-12 text-center text-slate-400 text-sm">
                       Nenhuma transação encontrada com os filtros selecionados.
                     </td>
                   </tr>
-                ) : paginadas.map((t) => {
-                  const scfg = STATUS_CFG[t.status];
+                ) : transacoes.map((t) => {
+                  const statusNorm = normalizeStatus(t.status);
+                  const tipoNorm = normalizeTipo(t.tipo);
+                  const scfg = STATUS_CFG[statusNorm];
                   const StatusIcon = scfg.icon;
+                  const dataFormatada = new Date(t.dataEmissao).toLocaleDateString("pt-BR");
+                  const nomePaciente = t.paciente?.nome ?? "—";
                   return (
                     <tr key={t.id} className="hover:bg-slate-50/40 transition-colors group">
-                      <td className="px-3 py-3 text-slate-400 text-xs whitespace-nowrap">{t.data}</td>
-                      <td className="px-3 py-3 text-slate-700 text-xs max-w-[140px] truncate">{t.paciente}</td>
+                      <td className="px-3 py-3 text-slate-400 text-xs whitespace-nowrap">{dataFormatada}</td>
+                      <td className="px-3 py-3 text-slate-700 text-xs max-w-[140px] truncate">{nomePaciente}</td>
                       <td className="px-3 py-3 text-slate-600 text-xs max-w-[160px] truncate">{t.descricao}</td>
                       <td className="px-3 py-3">
-                        <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded", t.tipo === "receita" ? "text-emerald-700 bg-emerald-50" : "text-red-600 bg-red-50")}>
+                        <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded", tipoNorm === "receita" ? "text-emerald-700 bg-emerald-50" : "text-red-600 bg-red-50")}>
                           {t.categoria}
                         </span>
                       </td>
-                      <td className="px-3 py-3 text-slate-400 text-xs">{t.convenio}</td>
-                      <td className="px-3 py-3 text-right text-xs text-slate-600 tabular-nums">{moeda(t.valorBruto)}</td>
+                      <td className="px-3 py-3 text-slate-400 text-xs">—</td>
+                      <td className="px-3 py-3 text-right text-xs text-slate-600 tabular-nums">{moeda(t.valor)}</td>
                       <td className="px-3 py-3 text-right text-xs text-slate-400 tabular-nums">{t.desconto > 0 ? `−${moeda(t.desconto)}` : "—"}</td>
                       <td className="px-3 py-3 text-right">
-                        <span className={cn("text-sm font-bold tabular-nums", t.tipo === "receita" ? "text-emerald-600" : "text-red-500")}>
-                          {t.tipo === "despesa" ? "−" : "+"}{moeda(t.valorLiquido)}
+                        <span className={cn("text-sm font-bold tabular-nums", tipoNorm === "receita" ? "text-emerald-600" : "text-red-500")}>
+                          {tipoNorm === "despesa" ? "−" : "+"}{moeda(t.valorLiquido)}
                         </span>
                       </td>
                       <td className="px-3 py-3">
@@ -465,13 +506,13 @@ export default function TransacoesPage() {
           {/* Footer — Totais + paginação */}
           <div className="flex items-center justify-between px-4 py-3 border-t bg-slate-50/60 shrink-0 flex-wrap gap-2">
             <div className="flex items-center gap-5 text-xs">
-              <span className="text-slate-500">Receitas: <span className="font-bold text-emerald-600">{moeda(totalReceitas)}</span></span>
-              <span className="text-slate-500">Despesas: <span className="font-bold text-red-500">{moeda(totalDespesas)}</span></span>
-              <span className="text-slate-500">Saldo: <span className="font-bold text-violet-600">{moeda(totalReceitas - totalDespesas)}</span></span>
+              <span className="text-slate-500">Receitas: <span className="font-bold text-emerald-600">{moeda(totais.receitas)}</span></span>
+              <span className="text-slate-500">Despesas: <span className="font-bold text-red-500">{moeda(totais.despesas)}</span></span>
+              <span className="text-slate-500">Saldo: <span className="font-bold text-violet-600">{moeda(totais.saldo)}</span></span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-400">
-                {(pagina - 1) * ITEMS_POR_PAGINA + 1}–{Math.min(pagina * ITEMS_POR_PAGINA, filtradas.length)} de {filtradas.length}
+                {total === 0 ? "0" : (pagina - 1) * ITEMS_POR_PAGINA + 1}–{Math.min(pagina * ITEMS_POR_PAGINA, total)} de {total}
               </span>
               <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={pagina === 1} className="p-1 rounded border hover:bg-white disabled:opacity-30 transition-colors">
                 <ChevronLeft className="w-3.5 h-3.5" />
@@ -537,7 +578,7 @@ export default function TransacoesPage() {
       )}
 
       {/* Modal */}
-      <NovaTransacaoModal open={modalAberto} onOpenChange={setModalAberto} />
+      <NovaTransacaoModal open={modalAberto} onOpenChange={setModalAberto} onCreated={fetchTransacoes} />
     </div>
   );
 }

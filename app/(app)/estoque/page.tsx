@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   PackageX,
   PackageMinus,
@@ -33,33 +33,31 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/use-toast";
+import {
+  getProdutos,
+  getMovimentacoes,
+  criarProduto,
+  atualizarProduto,
+  deletarProduto,
+  registrarMovimentacao,
+  type ProdutoComMovimentacoes,
+} from "@/lib/actions/estoque";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type StatusEstoque = "normal" | "baixo" | "zerado" | "vencendo";
 
-interface Produto {
+// Server returns this shape from getMovimentacoes
+interface MovimentacaoServidor {
   id: string;
-  nome: string;
-  categoria: string;
-  unidade: string;
-  qtdAtual: number;
-  qtdMinima: number;
-  validade?: string;
-  lote?: string;
-  fornecedor?: string;
-}
-
-interface Movimentacao {
-  id: string;
-  data: string;
-  hora: string;
-  produto: string;
-  tipo: "entrada" | "saida";
+  tipo: string;
   quantidade: number;
-  unidade: string;
-  responsavel: string;
-  motivo: string;
+  responsavel?: string | null;
+  observacoes?: string | null;
+  createdAt: Date;
+  produto: { id: string; nome: string; unidade: string };
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -67,47 +65,7 @@ interface Movimentacao {
 const CATEGORIAS = ["Medicamentos", "Material cirúrgico", "EPI", "Equipamentos", "Descartáveis", "Limpeza", "Outros"];
 const UNIDADES = ["un", "cx", "amp", "fr", "kg", "L", "mL", "par", "rolo"];
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const PRODUTOS_MOCK: Produto[] = [
-  { id: "1", nome: "Luva cirúrgica estéril P", categoria: "EPI", unidade: "par", qtdAtual: 45, qtdMinima: 50, validade: "2027-06-30", lote: "LC-2024-001", fornecedor: "Medline" },
-  { id: "2", nome: "Luva cirúrgica estéril M", categoria: "EPI", unidade: "par", qtdAtual: 32, qtdMinima: 50, validade: "2027-04-15", lote: "LC-2024-002", fornecedor: "Medline" },
-  { id: "3", nome: "Seringa 5mL", categoria: "Descartáveis", unidade: "un", qtdAtual: 0, qtdMinima: 100, validade: "2028-01-01", lote: "SR-2024-101", fornecedor: "BD Medical" },
-  { id: "4", nome: "Agulha 25x7", categoria: "Descartáveis", unidade: "un", qtdAtual: 80, qtdMinima: 100, validade: "2028-06-01", lote: "AG-2024-202", fornecedor: "BD Medical" },
-  { id: "5", nome: "Lidocaína 2% 20mL", categoria: "Medicamentos", unidade: "amp", qtdAtual: 12, qtdMinima: 10, validade: "2026-03-28", lote: "LI-2025-001", fornecedor: "Cristália" },
-  { id: "6", nome: "Clorhexidina 2% 1L", categoria: "Medicamentos", unidade: "fr", qtdAtual: 8, qtdMinima: 5, validade: "2026-08-15", lote: "CX-2025-033", fornecedor: "Rioquímica" },
-  { id: "7", nome: "Gaze estéril 7,5x7,5", categoria: "Material cirúrgico", unidade: "cx", qtdAtual: 15, qtdMinima: 10, validade: "2029-01-01", lote: "GZ-2024-055", fornecedor: "Cremer" },
-  { id: "8", nome: "Esparadrapo 10cm", categoria: "Material cirúrgico", unidade: "rolo", qtdAtual: 6, qtdMinima: 10, validade: "2028-03-01", lote: "ES-2024-077", fornecedor: "Cremer" },
-  { id: "9", nome: "Máscara cirúrgica tripla", categoria: "EPI", unidade: "cx", qtdAtual: 4, qtdMinima: 20, validade: "2027-12-01", lote: "MC-2024-099", fornecedor: "Nobre" },
-  { id: "10", nome: "Álcool 70% 500mL", categoria: "Limpeza", unidade: "fr", qtdAtual: 18, qtdMinima: 10, validade: "2026-02-28", lote: "AL-2025-011", fornecedor: "Rioquímica" },
-  { id: "11", nome: "Bisturi nº 15", categoria: "Material cirúrgico", unidade: "un", qtdAtual: 30, qtdMinima: 20, validade: "2030-01-01", lote: "BI-2024-022", fornecedor: "Solidor" },
-  { id: "12", nome: "Fio sutura 3-0", categoria: "Material cirúrgico", unidade: "un", qtdAtual: 0, qtdMinima: 30, validade: "2027-09-01", lote: "FS-2024-044", fornecedor: "Shalon" },
-];
-
-const MOVIMENTACOES_MOCK: Movimentacao[] = [
-  { id: "1", data: "12/03/2026", hora: "14:32", produto: "Lidocaína 2% 20mL", tipo: "saida", quantidade: 3, unidade: "amp", responsavel: "Dr. João Silva", motivo: "Procedimento cirúrgico" },
-  { id: "2", data: "12/03/2026", hora: "11:15", produto: "Luva cirúrgica estéril M", tipo: "saida", quantidade: 4, unidade: "par", responsavel: "Dra. Maria Oliveira", motivo: "Consulta" },
-  { id: "3", data: "11/03/2026", hora: "09:00", produto: "Seringa 5mL", tipo: "entrada", quantidade: 200, unidade: "un", responsavel: "Secretária Ana", motivo: "Compra — NF 2024/003" },
-  { id: "4", data: "11/03/2026", hora: "08:45", produto: "Agulha 25x7", tipo: "entrada", quantidade: 100, unidade: "un", responsavel: "Secretária Ana", motivo: "Compra — NF 2024/003" },
-  { id: "5", data: "10/03/2026", hora: "16:20", produto: "Gaze estéril 7,5x7,5", tipo: "saida", quantidade: 2, unidade: "cx", responsavel: "Enfermeiro Carlos", motivo: "Curativo pós-operatório" },
-  { id: "6", data: "10/03/2026", hora: "15:10", produto: "Álcool 70% 500mL", tipo: "saida", quantidade: 2, unidade: "fr", responsavel: "Técnico Bruno", motivo: "Assepsia sala cirúrgica" },
-  { id: "7", data: "09/03/2026", hora: "09:30", produto: "Máscara cirúrgica tripla", tipo: "entrada", quantidade: 10, unidade: "cx", responsavel: "Secretária Ana", motivo: "Compra urgente" },
-  { id: "8", data: "08/03/2026", hora: "17:00", produto: "Bisturi nº 15", tipo: "saida", quantidade: 5, unidade: "un", responsavel: "Dr. João Silva", motivo: "Procedimento" },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getStatus(produto: Produto): StatusEstoque {
-  const hoje = new Date();
-  const diasParaVencer = produto.validade
-    ? Math.ceil((new Date(produto.validade).getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24))
-    : 999;
-
-  if (produto.qtdAtual === 0) return "zerado";
-  if (diasParaVencer <= 30) return "vencendo";
-  if (produto.qtdAtual < produto.qtdMinima) return "baixo";
-  return "normal";
-}
 
 const STATUS_CFG: Record<StatusEstoque, { label: string; cls: string; dot: string }> = {
   normal: { label: "Normal", cls: "bg-emerald-100 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
@@ -116,19 +74,74 @@ const STATUS_CFG: Record<StatusEstoque, { label: string; cls: string; dot: strin
   vencendo: { label: "Vencendo", cls: "bg-orange-100 text-orange-700 border-orange-200", dot: "bg-orange-500" },
 };
 
-function formatValidade(validade?: string): string {
+function formatValidade(validade?: Date | null): string {
   if (!validade) return "—";
-  const [y, m, d] = validade.split("-");
-  return `${d}/${m}/${y}`;
+  const d = new Date(validade);
+  return d.toLocaleDateString("pt-BR");
 }
 
 // ─── Modals ───────────────────────────────────────────────────────────────────
 
-function CadastrarProdutoModal({ open, onOpenChange, produto }: {
+function CadastrarProdutoModal({
+  open,
+  onOpenChange,
+  produto,
+  onSuccess,
+}: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  produto?: Produto | null;
+  produto?: ProdutoComMovimentacoes | null;
+  onSuccess: () => void;
 }) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [nome, setNome] = useState(produto?.nome ?? "");
+  const [categoria, setCategoria] = useState(produto?.categoria ?? "");
+  const [unidade, setUnidade] = useState(produto?.unidade ?? "");
+  const [estoqueAtual, setEstoqueAtual] = useState(String(produto?.estoqueAtual ?? 0));
+  const [estoqueMinimo, setEstoqueMinimo] = useState(String(produto?.estoqueMinimo ?? 0));
+  const [validade, setValidade] = useState(
+    produto?.validade ? new Date(produto.validade).toISOString().split("T")[0] : ""
+  );
+
+  // Reset fields when product changes
+  useEffect(() => {
+    setNome(produto?.nome ?? "");
+    setCategoria(produto?.categoria ?? "");
+    setUnidade(produto?.unidade ?? "");
+    setEstoqueAtual(String(produto?.estoqueAtual ?? 0));
+    setEstoqueMinimo(String(produto?.estoqueMinimo ?? 0));
+    setValidade(produto?.validade ? new Date(produto.validade).toISOString().split("T")[0] : "");
+  }, [produto]);
+
+  const handleSubmit = async () => {
+    if (!nome || !categoria || !unidade) return;
+    setSaving(true);
+    try {
+      const payload = {
+        nome,
+        categoria,
+        unidade,
+        estoqueAtual: Number(estoqueAtual),
+        estoqueMinimo: Number(estoqueMinimo),
+        validade: validade || undefined,
+      };
+      if (produto) {
+        await atualizarProduto(produto.id, payload);
+        toast({ title: "Produto atualizado com sucesso!" });
+      } else {
+        await criarProduto(payload);
+        toast({ title: "Produto cadastrado com sucesso!" });
+      }
+      onOpenChange(false);
+      onSuccess();
+    } catch {
+      toast({ title: "Erro ao salvar produto", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -141,19 +154,24 @@ function CadastrarProdutoModal({ open, onOpenChange, produto }: {
         <div className="space-y-3 py-1">
           <div className="space-y-1.5">
             <Label className="text-xs">Nome do produto *</Label>
-            <Input className="h-8 text-xs" placeholder="Ex: Luva cirúrgica estéril P" defaultValue={produto?.nome} />
+            <Input
+              className="h-8 text-xs"
+              placeholder="Ex: Luva cirúrgica estéril P"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Categoria *</Label>
-              <Select defaultValue={produto?.categoria}>
+              <Select value={categoria} onValueChange={setCategoria}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Selecionar" /></SelectTrigger>
                 <SelectContent>{CATEGORIAS.map(c => <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Unidade *</Label>
-              <Select defaultValue={produto?.unidade}>
+              <Select value={unidade} onValueChange={setUnidade}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Selecionar" /></SelectTrigger>
                 <SelectContent>{UNIDADES.map(u => <SelectItem key={u} value={u} className="text-xs">{u}</SelectItem>)}</SelectContent>
               </Select>
@@ -162,32 +180,44 @@ function CadastrarProdutoModal({ open, onOpenChange, produto }: {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Quantidade atual</Label>
-              <Input type="number" min="0" className="h-8 text-xs" defaultValue={produto?.qtdAtual ?? 0} />
+              <Input
+                type="number"
+                min="0"
+                className="h-8 text-xs"
+                value={estoqueAtual}
+                onChange={(e) => setEstoqueAtual(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Estoque mínimo *</Label>
-              <Input type="number" min="0" className="h-8 text-xs" defaultValue={produto?.qtdMinima} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Validade</Label>
-              <Input type="date" className="h-8 text-xs" defaultValue={produto?.validade} />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Lote</Label>
-              <Input className="h-8 text-xs" placeholder="Ex: LC-2024-001" defaultValue={produto?.lote} />
+              <Input
+                type="number"
+                min="0"
+                className="h-8 text-xs"
+                value={estoqueMinimo}
+                onChange={(e) => setEstoqueMinimo(e.target.value)}
+              />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs">Fornecedor</Label>
-            <Input className="h-8 text-xs" placeholder="Nome do fornecedor" defaultValue={produto?.fornecedor} />
+            <Label className="text-xs">Validade</Label>
+            <Input
+              type="date"
+              className="h-8 text-xs"
+              value={validade}
+              onChange={(e) => setValidade(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" size="sm" className="text-xs" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-xs" onClick={() => onOpenChange(false)}>
-            {produto ? "Salvar alterações" : "Cadastrar"}
+          <Button variant="outline" size="sm" className="text-xs" onClick={() => onOpenChange(false)} disabled={saving}>Cancelar</Button>
+          <Button
+            size="sm"
+            className="bg-violet-600 hover:bg-violet-700 text-xs"
+            disabled={!nome || !categoria || !unidade || saving}
+            onClick={handleSubmit}
+          >
+            {saving ? "Salvando..." : produto ? "Salvar alterações" : "Cadastrar"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -195,14 +225,58 @@ function CadastrarProdutoModal({ open, onOpenChange, produto }: {
   );
 }
 
-function MovimentacaoModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const [tipo, setTipo] = useState<"entrada" | "saida">("entrada");
+function MovimentacaoModal({
+  open,
+  onOpenChange,
+  produtos,
+  onSuccess,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  produtos: ProdutoComMovimentacoes[];
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [tipo, setTipo] = useState<"ENTRADA" | "SAIDA">("ENTRADA");
+  const [produtoId, setProdutoId] = useState("");
+  const [quantidade, setQuantidade] = useState("");
+  const [responsavel, setResponsavel] = useState("");
+  const [observacoes, setObservacoes] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!produtoId || !quantidade) return;
+    setSaving(true);
+    try {
+      await registrarMovimentacao({
+        produtoId,
+        tipo,
+        quantidade: Number(quantidade),
+        responsavel: responsavel || undefined,
+        observacoes: observacoes || undefined,
+      });
+      toast({ title: "Movimentação registrada com sucesso!" });
+      // Reset form
+      setProdutoId("");
+      setQuantidade("");
+      setResponsavel("");
+      setObservacoes("");
+      onOpenChange(false);
+      onSuccess();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro ao registrar movimentação";
+      toast({ title: msg, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
-            {tipo === "entrada"
+            {tipo === "ENTRADA"
               ? <ArrowDownCircle className="w-4 h-4 text-emerald-600" />
               : <ArrowUpCircle className="w-4 h-4 text-red-500" />}
             Registrar movimentação
@@ -210,48 +284,71 @@ function MovimentacaoModal({ open, onOpenChange }: { open: boolean; onOpenChange
         </DialogHeader>
         <div className="space-y-3 py-1">
           <div className="flex rounded-lg border overflow-hidden text-xs font-semibold">
-            {(["entrada", "saida"] as const).map(t => (
+            {(["ENTRADA", "SAIDA"] as const).map(t => (
               <button
                 key={t}
                 onClick={() => setTipo(t)}
                 className={cn("flex-1 py-2 transition-colors", tipo === t
-                  ? t === "entrada" ? "bg-emerald-600 text-white" : "bg-red-500 text-white"
+                  ? t === "ENTRADA" ? "bg-emerald-600 text-white" : "bg-red-500 text-white"
                   : "bg-white text-slate-500 hover:bg-slate-50")}
               >
-                {t === "entrada" ? "Entrada" : "Saída"}
+                {t === "ENTRADA" ? "Entrada" : "Saída"}
               </button>
             ))}
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Produto *</Label>
-            <Select>
+            <Select value={produtoId} onValueChange={setProdutoId}>
               <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Selecionar produto" /></SelectTrigger>
-              <SelectContent>{PRODUTOS_MOCK.map(p => <SelectItem key={p.id} value={p.id} className="text-xs">{p.nome}</SelectItem>)}</SelectContent>
+              <SelectContent>
+                {produtos.map(p => (
+                  <SelectItem key={p.id} value={p.id} className="text-xs">{p.nome}</SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Quantidade *</Label>
-              <Input type="number" min="1" className="h-8 text-xs" placeholder="0" />
+              <Input
+                type="number"
+                min="1"
+                className="h-8 text-xs"
+                placeholder="0"
+                value={quantidade}
+                onChange={(e) => setQuantidade(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Data</Label>
-              <Input type="date" className="h-8 text-xs" defaultValue={new Date().toISOString().split("T")[0]} />
+              <Label className="text-xs">Responsável</Label>
+              <Input
+                className="h-8 text-xs"
+                placeholder="Nome"
+                value={responsavel}
+                onChange={(e) => setResponsavel(e.target.value)}
+              />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs">Motivo</Label>
-            <Textarea placeholder="Descreva o motivo da movimentação..." rows={2} className="resize-none text-xs" />
+            <Label className="text-xs">Motivo / Observações</Label>
+            <Textarea
+              placeholder="Descreva o motivo da movimentação..."
+              rows={2}
+              className="resize-none text-xs"
+              value={observacoes}
+              onChange={(e) => setObservacoes(e.target.value)}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" size="sm" className="text-xs" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button variant="outline" size="sm" className="text-xs" onClick={() => onOpenChange(false)} disabled={saving}>Cancelar</Button>
           <Button
             size="sm"
-            className={cn("text-xs", tipo === "entrada" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-500 hover:bg-red-600")}
-            onClick={() => onOpenChange(false)}
+            className={cn("text-xs", tipo === "ENTRADA" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-500 hover:bg-red-600")}
+            disabled={!produtoId || !quantidade || saving}
+            onClick={handleSubmit}
           >
-            Registrar {tipo}
+            {saving ? "Registrando..." : `Registrar ${tipo === "ENTRADA" ? "entrada" : "saída"}`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -261,18 +358,32 @@ function MovimentacaoModal({ open, onOpenChange }: { open: boolean; onOpenChange
 
 // ─── Aba Estoque Atual ────────────────────────────────────────────────────────
 
-function AbaEstoqueAtual({ onMovimentar }: { onMovimentar: () => void }) {
+function AbaEstoqueAtual({
+  produtos,
+  totalProdutos,
+  loading,
+  onMovimentar,
+  onEdit,
+  onDelete,
+  onFiltroChange,
+}: {
+  produtos: ProdutoComMovimentacoes[];
+  totalProdutos: number;
+  loading: boolean;
+  onMovimentar: () => void;
+  onEdit: (p: ProdutoComMovimentacoes) => void;
+  onDelete: (id: string) => void;
+  onFiltroChange: (filtros: { busca?: string; categoria?: string; status?: string }) => void;
+}) {
   const [busca, setBusca] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState("todos");
   const [filtroStatus, setFiltroStatus] = useState("todos");
 
-  const filtrados = useMemo(() => {
-    return PRODUTOS_MOCK.filter((p) => {
-      const status = getStatus(p);
-      const matchBusca = !busca || p.nome.toLowerCase().includes(busca.toLowerCase());
-      const matchCat = filtroCategoria === "todos" || p.categoria === filtroCategoria;
-      const matchStatus = filtroStatus === "todos" || status === filtroStatus;
-      return matchBusca && matchCat && matchStatus;
+  useEffect(() => {
+    onFiltroChange({
+      busca: busca || undefined,
+      categoria: filtroCategoria !== "todos" ? filtroCategoria : undefined,
+      status: filtroStatus !== "todos" ? filtroStatus : undefined,
     });
   }, [busca, filtroCategoria, filtroStatus]);
 
@@ -307,81 +418,95 @@ function AbaEstoqueAtual({ onMovimentar }: { onMovimentar: () => void }) {
       </div>
 
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-slate-50/60">
-              {["Produto", "Categoria", "Qtd. Atual", "Mínimo", "Lote", "Validade", "Status", "Ações"].map(h => (
-                <th key={h} className={cn("px-4 py-2.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider",
-                  ["Qtd. Atual", "Mínimo"].includes(h) ? "text-right" : "text-left"
-                )}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filtrados.map((p) => {
-              const status = getStatus(p);
-              const cfg = STATUS_CFG[status];
-              const diasValidade = p.validade
-                ? Math.ceil((new Date(p.validade).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-                : null;
-              return (
-                <tr key={p.id} className="hover:bg-slate-50/40 transition-colors group">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-violet-50 flex items-center justify-center shrink-0">
-                        <Package className="w-3.5 h-3.5 text-violet-500" />
-                      </div>
-                      <span className="font-medium text-slate-800 text-xs leading-tight">{p.nome}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-slate-500">{p.categoria}</span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className={cn(
-                      "text-sm font-bold tabular-nums",
-                      p.qtdAtual === 0 ? "text-red-500" : p.qtdAtual < p.qtdMinima ? "text-amber-600" : "text-slate-800"
-                    )}>
-                      {p.qtdAtual}
-                    </span>
-                    <span className="text-[10px] text-slate-400 ml-1">{p.unidade}</span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-xs text-slate-400 tabular-nums">{p.qtdMinima} {p.unidade}</td>
-                  <td className="px-4 py-3 text-xs text-slate-400">{p.lote || "—"}</td>
-                  <td className="px-4 py-3">
-                    <div>
-                      <p className="text-xs text-slate-600">{formatValidade(p.validade)}</p>
-                      {diasValidade !== null && diasValidade <= 90 && (
-                        <p className={cn("text-[10px]", diasValidade <= 30 ? "text-orange-500 font-semibold" : "text-slate-400")}>
-                          {diasValidade > 0 ? `${diasValidade}d restantes` : "Vencido"}
-                        </p>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border", cfg.cls)}>
-                      <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
-                      {cfg.label}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button className="p-1 rounded hover:bg-violet-50 text-violet-500 transition-colors">
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button className="p-1 rounded hover:bg-red-50 text-red-400 transition-colors">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
+        {loading ? (
+          <div className="p-4 space-y-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-slate-50/60">
+                  {["Produto", "Categoria", "Qtd. Atual", "Mínimo", "Validade", "Status", "Ações"].map(h => (
+                    <th key={h} className={cn("px-4 py-2.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider",
+                      ["Qtd. Atual", "Mínimo"].includes(h) ? "text-right" : "text-left"
+                    )}>{h}</th>
+                  ))}
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div className="px-4 py-2.5 border-t bg-slate-50/60 text-xs text-slate-400">
-          {filtrados.length} de {PRODUTOS_MOCK.length} produtos
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {produtos.map((p) => {
+                  const cfg = STATUS_CFG[p.status];
+                  const diasValidade = p.validade
+                    ? Math.ceil((new Date(p.validade).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+                    : null;
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50/40 transition-colors group">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-violet-50 flex items-center justify-center shrink-0">
+                            <Package className="w-3.5 h-3.5 text-violet-500" />
+                          </div>
+                          <span className="font-medium text-slate-800 text-xs leading-tight">{p.nome}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-slate-500">{p.categoria}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={cn(
+                          "text-sm font-bold tabular-nums",
+                          p.estoqueAtual === 0 ? "text-red-500" : p.estoqueAtual < p.estoqueMinimo ? "text-amber-600" : "text-slate-800"
+                        )}>
+                          {p.estoqueAtual}
+                        </span>
+                        <span className="text-[10px] text-slate-400 ml-1">{p.unidade}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs text-slate-400 tabular-nums">{p.estoqueMinimo} {p.unidade}</td>
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="text-xs text-slate-600">{formatValidade(p.validade)}</p>
+                          {diasValidade !== null && diasValidade <= 90 && (
+                            <p className={cn("text-[10px]", diasValidade <= 30 ? "text-orange-500 font-semibold" : "text-slate-400")}>
+                              {diasValidade > 0 ? `${diasValidade}d restantes` : "Vencido"}
+                            </p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border", cfg.cls)}>
+                          <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
+                          {cfg.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            className="p-1 rounded hover:bg-violet-50 text-violet-500 transition-colors"
+                            onClick={() => onEdit(p)}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            className="p-1 rounded hover:bg-red-50 text-red-400 transition-colors"
+                            onClick={() => onDelete(p.id)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="px-4 py-2.5 border-t bg-slate-50/60 text-xs text-slate-400">
+              {produtos.length} de {totalProdutos} produtos
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -389,81 +514,122 @@ function AbaEstoqueAtual({ onMovimentar }: { onMovimentar: () => void }) {
 
 // ─── Aba Movimentações ────────────────────────────────────────────────────────
 
-function AbaMovimentacoes({ onRegistrar }: { onRegistrar: () => void }) {
+function AbaMovimentacoes({
+  movimentacoes,
+  loading,
+  onRegistrar,
+}: {
+  movimentacoes: MovimentacaoServidor[];
+  loading: boolean;
+  onRegistrar: () => void;
+}) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-slate-500">{MOVIMENTACOES_MOCK.length} registros recentes</p>
+        <p className="text-xs text-slate-500">{movimentacoes.length} registros recentes</p>
         <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-xs gap-1.5 h-8" onClick={onRegistrar}>
           <Plus className="w-3.5 h-3.5" />Registrar movimentação
         </Button>
       </div>
 
-      {/* Timeline */}
-      <div className="space-y-2">
-        {MOVIMENTACOES_MOCK.map((m, idx) => {
-          const isEntrada = m.tipo === "entrada";
-          return (
-            <div key={m.id} className="relative">
-              {/* Day separator */}
-              {(idx === 0 || MOVIMENTACOES_MOCK[idx - 1].data !== m.data) && (
-                <div className="flex items-center gap-3 my-3">
-                  <div className="flex-1 h-px bg-slate-200" />
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2">{m.data}</span>
-                  <div className="flex-1 h-px bg-slate-200" />
-                </div>
-              )}
+      {loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 w-full rounded-xl" />
+          ))}
+        </div>
+      ) : (
+        /* Timeline */
+        <div className="space-y-2">
+          {movimentacoes.map((m, idx) => {
+            const isEntrada = m.tipo === "ENTRADA";
+            const dataStr = new Date(m.createdAt).toLocaleDateString("pt-BR");
+            const horaStr = new Date(m.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+            const prevDataStr = idx > 0 ? new Date(movimentacoes[idx - 1].createdAt).toLocaleDateString("pt-BR") : null;
 
-              <div className="flex gap-3 items-start bg-white rounded-xl border shadow-sm p-3 hover:border-slate-200 hover:shadow-md transition-all">
-                {/* Icon */}
-                <div className={cn(
-                  "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-                  isEntrada ? "bg-emerald-50" : "bg-red-50"
-                )}>
-                  {isEntrada
-                    ? <ArrowDownCircle className="w-5 h-5 text-emerald-600" />
-                    : <ArrowUpCircle className="w-5 h-5 text-red-500" />}
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{m.produto}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{m.motivo}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className={cn("text-sm font-bold tabular-nums", isEntrada ? "text-emerald-600" : "text-red-500")}>
-                        {isEntrada ? "+" : "−"}{m.quantidade} {m.unidade}
-                      </p>
-                      <p className="text-[10px] text-slate-400">{m.hora}</p>
-                    </div>
+            return (
+              <div key={m.id} className="relative">
+                {/* Day separator */}
+                {(idx === 0 || prevDataStr !== dataStr) && (
+                  <div className="flex items-center gap-3 my-3">
+                    <div className="flex-1 h-px bg-slate-200" />
+                    <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2">{dataStr}</span>
+                    <div className="flex-1 h-px bg-slate-200" />
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">por {m.responsavel}</p>
+                )}
+
+                <div className="flex gap-3 items-start bg-white rounded-xl border shadow-sm p-3 hover:border-slate-200 hover:shadow-md transition-all">
+                  {/* Icon */}
+                  <div className={cn(
+                    "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
+                    isEntrada ? "bg-emerald-50" : "bg-red-50"
+                  )}>
+                    {isEntrada
+                      ? <ArrowDownCircle className="w-5 h-5 text-emerald-600" />
+                      : <ArrowUpCircle className="w-5 h-5 text-red-500" />}
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{m.produto.nome}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{m.observacoes || "—"}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={cn("text-sm font-bold tabular-nums", isEntrada ? "text-emerald-600" : "text-red-500")}>
+                          {isEntrada ? "+" : "−"}{m.quantidade} {m.produto.unidade}
+                        </p>
+                        <p className="text-[10px] text-slate-400">{horaStr}</p>
+                      </div>
+                    </div>
+                    {m.responsavel && (
+                      <p className="text-[10px] text-slate-400 mt-1">por {m.responsavel}</p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Aba Produtos (CRUD) ──────────────────────────────────────────────────────
 
-function AbaProdutos() {
+function AbaProdutos({
+  produtos,
+  loading,
+  onRefresh,
+}: {
+  produtos: ProdutoComMovimentacoes[];
+  loading: boolean;
+  onRefresh: () => void;
+}) {
   const [busca, setBusca] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState("todos");
   const [modalCadastro, setModalCadastro] = useState(false);
-  const [produtoEditando, setProdutoEditando] = useState<Produto | null>(null);
+  const [produtoEditando, setProdutoEditando] = useState<ProdutoComMovimentacoes | null>(null);
+  const { toast } = useToast();
 
   const filtrados = useMemo(() => {
-    return PRODUTOS_MOCK.filter(p =>
+    return produtos.filter(p =>
       (!busca || p.nome.toLowerCase().includes(busca.toLowerCase())) &&
       (filtroCategoria === "todos" || p.categoria === filtroCategoria)
     );
-  }, [busca, filtroCategoria]);
+  }, [produtos, busca, filtroCategoria]);
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deletarProduto(id);
+      toast({ title: "Produto removido com sucesso!" });
+      onRefresh();
+    } catch {
+      toast({ title: "Erro ao remover produto", variant: "destructive" });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -489,69 +655,85 @@ function AbaProdutos() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {filtrados.map((p) => {
-          const status = getStatus(p);
-          const cfg = STATUS_CFG[status];
-          const pct = p.qtdMinima > 0 ? Math.min((p.qtdAtual / p.qtdMinima) * 100, 100) : 100;
-          return (
-            <div key={p.id} className="bg-white rounded-xl border shadow-sm p-4 hover:shadow-md hover:border-slate-200 transition-all group">
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-9 h-9 rounded-lg bg-violet-50 flex items-center justify-center shrink-0">
-                    <Package className="w-4.5 h-4.5 text-violet-600" />
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-36 rounded-xl" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filtrados.map((p) => {
+            const cfg = STATUS_CFG[p.status];
+            const pct = p.estoqueMinimo > 0 ? Math.min((p.estoqueAtual / p.estoqueMinimo) * 100, 100) : 100;
+            return (
+              <div key={p.id} className="bg-white rounded-xl border shadow-sm p-4 hover:shadow-md hover:border-slate-200 transition-all group">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-9 h-9 rounded-lg bg-violet-50 flex items-center justify-center shrink-0">
+                      <Package className="w-4 h-4 text-violet-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800 leading-tight">{p.nome}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{p.categoria}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800 leading-tight">{p.nome}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{p.categoria} · {p.fornecedor || "—"}</p>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <button
+                      className="p-1 rounded hover:bg-violet-50 text-violet-400"
+                      onClick={() => { setProdutoEditando(p); setModalCadastro(true); }}
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      className="p-1 rounded hover:bg-red-50 text-red-400"
+                      onClick={() => handleDelete(p.id)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  <button
-                    className="p-1 rounded hover:bg-violet-50 text-violet-400"
-                    onClick={() => { setProdutoEditando(p); setModalCadastro(true); }}
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  <button className="p-1 rounded hover:bg-red-50 text-red-400">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
 
-              {/* Stock bar */}
-              <div className="space-y-1 mb-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500">Estoque</span>
-                  <span className="font-bold text-slate-800 tabular-nums">{p.qtdAtual} / {p.qtdMinima} {p.unidade}</span>
+                {/* Stock bar */}
+                <div className="space-y-1 mb-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Estoque</span>
+                    <span className="font-bold text-slate-800 tabular-nums">{p.estoqueAtual} / {p.estoqueMinimo} {p.unidade}</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={cn("h-full rounded-full transition-all",
+                        p.status === "zerado" ? "bg-red-500"
+                        : p.status === "vencendo" ? "bg-orange-400"
+                        : p.status === "baixo" ? "bg-amber-400"
+                        : "bg-emerald-500"
+                      )}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className={cn("h-full rounded-full transition-all", status === "zerado" ? "bg-red-500" : status === "vencendo" ? "bg-orange-400" : status === "baixo" ? "bg-amber-400" : "bg-emerald-500")}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                  <CalendarClock className="w-3 h-3" />
-                  {formatValidade(p.validade)}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                    <CalendarClock className="w-3 h-3" />
+                    {formatValidade(p.validade)}
+                  </div>
+                  <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold border", cfg.cls)}>
+                    <span className={cn("w-1 h-1 rounded-full", cfg.dot)} />
+                    {cfg.label}
+                  </span>
                 </div>
-                <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold border", cfg.cls)}>
-                  <span className={cn("w-1 h-1 rounded-full", cfg.dot)} />
-                  {cfg.label}
-                </span>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       <CadastrarProdutoModal
         open={modalCadastro}
         onOpenChange={(v) => { setModalCadastro(v); if (!v) setProdutoEditando(null); }}
         produto={produtoEditando}
+        onSuccess={onRefresh}
       />
     </div>
   );
@@ -560,11 +742,65 @@ function AbaProdutos() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function EstoquePage() {
+  const { toast } = useToast();
+
+  const [produtos, setProdutos] = useState<ProdutoComMovimentacoes[]>([]);
+  const [totalProdutos, setTotalProdutos] = useState(0);
+  const [alertas, setAlertas] = useState({ zerados: 0, baixo: 0, vencendo: 0 });
+  const [loadingProdutos, setLoadingProdutos] = useState(true);
+
+  const [movimentacoes, setMovimentacoes] = useState<MovimentacaoServidor[]>([]);
+  const [loadingMovimentacoes, setLoadingMovimentacoes] = useState(true);
+
   const [modalMovimentacao, setModalMovimentacao] = useState(false);
 
-  const zerados = PRODUTOS_MOCK.filter(p => getStatus(p) === "zerado").length;
-  const baixo = PRODUTOS_MOCK.filter(p => getStatus(p) === "baixo").length;
-  const vencendo = PRODUTOS_MOCK.filter(p => getStatus(p) === "vencendo").length;
+  // Current filters used by AbaEstoqueAtual
+  const [filtros, setFiltros] = useState<{ busca?: string; categoria?: string; status?: string }>({});
+
+  const fetchProdutos = useCallback(async (f?: { busca?: string; categoria?: string; status?: string }) => {
+    setLoadingProdutos(true);
+    getProdutos(f ?? filtros)
+      .then(({ produtos: p, alertas: a }) => {
+        setProdutos(p);
+        setTotalProdutos(p.length);
+        setAlertas(a);
+      })
+      .catch(() => toast({ title: "Erro ao carregar produtos", variant: "destructive" }))
+      .finally(() => setLoadingProdutos(false));
+  }, [filtros, toast]);
+
+  const fetchMovimentacoes = useCallback(async () => {
+    setLoadingMovimentacoes(true);
+    getMovimentacoes()
+      .then((data) => setMovimentacoes(data as unknown as MovimentacaoServidor[]))
+      .catch(() => toast({ title: "Erro ao carregar movimentações", variant: "destructive" }))
+      .finally(() => setLoadingMovimentacoes(false));
+  }, [toast]);
+
+  useEffect(() => {
+    fetchProdutos();
+    fetchMovimentacoes();
+  }, []);
+
+  const handleFiltroChange = (novosFiltros: { busca?: string; categoria?: string; status?: string }) => {
+    setFiltros(novosFiltros);
+    fetchProdutos(novosFiltros);
+  };
+
+  const handleDeleteProduto = async (id: string) => {
+    try {
+      await deletarProduto(id);
+      toast({ title: "Produto removido com sucesso!" });
+      fetchProdutos();
+    } catch {
+      toast({ title: "Erro ao remover produto", variant: "destructive" });
+    }
+  };
+
+  const handleMovimentacaoSuccess = () => {
+    fetchProdutos();
+    fetchMovimentacoes();
+  };
 
   return (
     <div className="space-y-5">
@@ -581,38 +817,47 @@ export default function EstoquePage() {
 
       {/* Alert cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className={cn("flex items-center gap-3 rounded-xl border px-4 py-3 shadow-sm", vencendo > 0 ? "bg-orange-50 border-orange-200" : "bg-slate-50 border-slate-200 opacity-60")}>
+        <div className={cn("flex items-center gap-3 rounded-xl border px-4 py-3 shadow-sm", alertas.vencendo > 0 ? "bg-orange-50 border-orange-200" : "bg-slate-50 border-slate-200 opacity-60")}>
           <div className="w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
             <CalendarClock className="w-5 h-5 text-orange-600" />
           </div>
           <div>
-            <p className="text-xl font-bold text-orange-700">{vencendo}</p>
+            {loadingProdutos
+              ? <Skeleton className="h-7 w-12 mb-1" />
+              : <p className="text-xl font-bold text-orange-700">{alertas.vencendo}</p>
+            }
             <p className="text-[10px] font-semibold text-orange-600 leading-tight">
-              {vencendo === 1 ? "produto vence" : "produtos vencem"} em menos de 30 dias
+              {alertas.vencendo === 1 ? "produto vence" : "produtos vencem"} em menos de 30 dias
             </p>
           </div>
         </div>
 
-        <div className={cn("flex items-center gap-3 rounded-xl border px-4 py-3 shadow-sm", zerados > 0 ? "bg-red-50 border-red-200" : "bg-slate-50 border-slate-200 opacity-60")}>
+        <div className={cn("flex items-center gap-3 rounded-xl border px-4 py-3 shadow-sm", alertas.zerados > 0 ? "bg-red-50 border-red-200" : "bg-slate-50 border-slate-200 opacity-60")}>
           <div className="w-9 h-9 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
             <PackageX className="w-5 h-5 text-red-600" />
           </div>
           <div>
-            <p className="text-xl font-bold text-red-700">{zerados}</p>
+            {loadingProdutos
+              ? <Skeleton className="h-7 w-12 mb-1" />
+              : <p className="text-xl font-bold text-red-700">{alertas.zerados}</p>
+            }
             <p className="text-[10px] font-semibold text-red-600 leading-tight">
-              {zerados === 1 ? "produto com" : "produtos com"} estoque zerado
+              {alertas.zerados === 1 ? "produto com" : "produtos com"} estoque zerado
             </p>
           </div>
         </div>
 
-        <div className={cn("flex items-center gap-3 rounded-xl border px-4 py-3 shadow-sm", baixo > 0 ? "bg-amber-50 border-amber-200" : "bg-slate-50 border-slate-200 opacity-60")}>
+        <div className={cn("flex items-center gap-3 rounded-xl border px-4 py-3 shadow-sm", alertas.baixo > 0 ? "bg-amber-50 border-amber-200" : "bg-slate-50 border-slate-200 opacity-60")}>
           <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
             <PackageMinus className="w-5 h-5 text-amber-600" />
           </div>
           <div>
-            <p className="text-xl font-bold text-amber-700">{baixo}</p>
+            {loadingProdutos
+              ? <Skeleton className="h-7 w-12 mb-1" />
+              : <p className="text-xl font-bold text-amber-700">{alertas.baixo}</p>
+            }
             <p className="text-[10px] font-semibold text-amber-600 leading-tight">
-              {baixo === 1 ? "produto abaixo" : "produtos abaixo"} do estoque mínimo
+              {alertas.baixo === 1 ? "produto abaixo" : "produtos abaixo"} do estoque mínimo
             </p>
           </div>
         </div>
@@ -627,17 +872,40 @@ export default function EstoquePage() {
         </TabsList>
 
         <TabsContent value="estoque" className="mt-4">
-          <AbaEstoqueAtual onMovimentar={() => setModalMovimentacao(true)} />
+          <AbaEstoqueAtual
+            produtos={produtos}
+            totalProdutos={totalProdutos}
+            loading={loadingProdutos}
+            onMovimentar={() => setModalMovimentacao(true)}
+            onEdit={(_p) => {
+              // Edit is handled inside AbaProdutos tab via its own modal
+            }}
+            onDelete={handleDeleteProduto}
+            onFiltroChange={handleFiltroChange}
+          />
         </TabsContent>
         <TabsContent value="movimentacoes" className="mt-4">
-          <AbaMovimentacoes onRegistrar={() => setModalMovimentacao(true)} />
+          <AbaMovimentacoes
+            movimentacoes={movimentacoes}
+            loading={loadingMovimentacoes}
+            onRegistrar={() => setModalMovimentacao(true)}
+          />
         </TabsContent>
         <TabsContent value="produtos" className="mt-4">
-          <AbaProdutos />
+          <AbaProdutos
+            produtos={produtos}
+            loading={loadingProdutos}
+            onRefresh={fetchProdutos}
+          />
         </TabsContent>
       </Tabs>
 
-      <MovimentacaoModal open={modalMovimentacao} onOpenChange={setModalMovimentacao} />
+      <MovimentacaoModal
+        open={modalMovimentacao}
+        onOpenChange={setModalMovimentacao}
+        produtos={produtos}
+        onSuccess={handleMovimentacaoSuccess}
+      />
     </div>
   );
 }

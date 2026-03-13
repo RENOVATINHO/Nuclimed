@@ -1,16 +1,13 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Search,
   MessageCircle,
   Mail,
   Calendar,
-  Users,
   Megaphone,
-  ChevronDown,
   Plus,
-  X,
   Send,
   Clock,
   UserX,
@@ -41,26 +38,30 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/use-toast";
+import { getAniversariantes, getPacientesInativos } from "@/lib/actions/pacientes";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Aniversariante {
   id: string;
   nome: string;
-  dataNascimento: string;
-  mes: number;
-  dia: number;
-  telefone: string;
-  email: string;
+  dataNascimento: Date | null;
+  email: string | null;
+  telefone: string | null;
+  convenio: string | null;
+  diaNascimento: number;
 }
 
 interface PacienteInativo {
   id: string;
   nome: string;
-  ultimaVisita: string;
-  diasInativo: number;
-  telefone: string;
-  email: string;
+  email: string | null;
+  telefone: string | null;
+  convenio: string | null;
+  ultimoAgendamento: Date | null;
+  diasInativo: number | null;
 }
 
 interface Oportunidade {
@@ -73,30 +74,9 @@ interface Oportunidade {
   data: string;
 }
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Static Mock Data (no server action available) ────────────────────────────
 
 const MESES_PT = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-
-const ANIVERSARIANTES_MOCK: Aniversariante[] = [
-  { id: "1", nome: "Ana Paula Ferreira", dataNascimento: "15/03/1990", mes: 3, dia: 15, telefone: "(11) 99234-5678", email: "ana.paula@email.com" },
-  { id: "2", nome: "Carlos Eduardo Santos", dataNascimento: "22/03/1985", mes: 3, dia: 22, telefone: "(11) 98765-4321", email: "carlos.eduardo@email.com" },
-  { id: "3", nome: "Mariana Costa Oliveira", dataNascimento: "07/03/1995", mes: 3, dia: 7, telefone: "(11) 97654-3210", email: "mariana.co@email.com" },
-  { id: "4", nome: "Pedro Henrique Rocha", dataNascimento: "29/03/1988", mes: 3, dia: 29, telefone: "(11) 96543-2109", email: "pedro.hr@email.com" },
-  { id: "5", nome: "Beatriz Nascimento", dataNascimento: "03/04/1992", mes: 4, dia: 3, telefone: "(11) 95432-1098", email: "beatriz.n@email.com" },
-  { id: "6", nome: "Lucas Ferreira Dias", dataNascimento: "18/04/1987", mes: 4, dia: 18, telefone: "(11) 94321-0987", email: "lucas.fd@email.com" },
-  { id: "7", nome: "Fernanda Lima Sousa", dataNascimento: "25/04/1993", mes: 4, dia: 25, telefone: "(11) 93210-9876", email: "fernanda.ls@email.com" },
-];
-
-const INATIVOS_MOCK: PacienteInativo[] = [
-  { id: "1", nome: "Roberto Alves Lima", ultimaVisita: "10/09/2025", diasInativo: 183, telefone: "(11) 99111-2222", email: "roberto.al@email.com" },
-  { id: "2", nome: "Sandra Pereira Lima", ultimaVisita: "02/10/2025", diasInativo: 161, telefone: "(11) 99222-3333", email: "sandra.pl@email.com" },
-  { id: "3", nome: "Thiago Mendes Barros", ultimaVisita: "15/11/2025", diasInativo: 117, telefone: "(11) 99333-4444", email: "thiago.mb@email.com" },
-  { id: "4", nome: "Vanessa Albuquerque", ultimaVisita: "01/12/2025", diasInativo: 101, telefone: "(11) 99444-5555", email: "vanessa.a@email.com" },
-  { id: "5", nome: "Diego Monteiro Silva", ultimaVisita: "20/12/2025", diasInativo: 82, telefone: "(11) 99555-6666", email: "diego.ms@email.com" },
-  { id: "6", nome: "Patricia Rodrigues", ultimaVisita: "08/01/2026", diasInativo: 63, telefone: "(11) 99666-7777", email: "patricia.r@email.com" },
-  { id: "7", nome: "Gustavo Henrique Pinto", ultimaVisita: "25/01/2026", diasInativo: 46, telefone: "(11) 99777-8888", email: "gustavo.hp@email.com" },
-  { id: "8", nome: "Camila Barbosa Freitas", ultimaVisita: "10/02/2026", diasInativo: 30, telefone: "(11) 99888-9999", email: "camila.bf@email.com" },
-];
 
 const OPORTUNIDADES_MOCK: Oportunidade[] = [
   { id: "1", nome: "Rodrigo Tavares", origem: "Indicação", telefone: "(11) 98001-1001", coluna: "novo", data: "10/03/2026" },
@@ -263,20 +243,46 @@ function NovaOportunidadeModal({ open, onOpenChange }: { open: boolean; onOpenCh
 // ─── Aba Aniversariantes ──────────────────────────────────────────────────────
 
 function AbaAniversariantes() {
-  const MES_ATUAL = 3;
+  const { toast } = useToast();
+  const MES_ATUAL = new Date().getMonth() + 1;
   const [filtroPeriodo, setFiltroPeriodo] = useState("este-mes");
   const [busca, setBusca] = useState("");
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [modalMensagem, setModalMensagem] = useState(false);
 
+  const [aniversariantes, setAniversariantes] = useState<Aniversariante[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    // Fetch current month + next month together, filter in UI
+    Promise.all([
+      getAniversariantes(MES_ATUAL),
+      getAniversariantes(MES_ATUAL === 12 ? 1 : MES_ATUAL + 1),
+    ])
+      .then(([thisMonth, nextMonth]) => {
+        const combined = [...thisMonth, ...nextMonth];
+        // Deduplicate by id
+        const seen = new Set<string>();
+        setAniversariantes(combined.filter((a) => {
+          if (seen.has(a.id)) return false;
+          seen.add(a.id);
+          return true;
+        }));
+      })
+      .catch(() => toast({ title: "Erro ao carregar aniversariantes", variant: "destructive" }))
+      .finally(() => setLoading(false));
+  }, []);
+
   const filtrados = useMemo(() => {
-    const mesFiltro = filtroPeriodo === "este-mes" ? MES_ATUAL : MES_ATUAL + 1;
-    return ANIVERSARIANTES_MOCK.filter((a) => {
-      const matchMes = filtroPeriodo === "todos" || a.mes === mesFiltro;
+    return aniversariantes.filter((a) => {
+      const mesPaciente = a.dataNascimento ? new Date(a.dataNascimento).getMonth() + 1 : null;
+      const mesFiltro = filtroPeriodo === "este-mes" ? MES_ATUAL : MES_ATUAL === 12 ? 1 : MES_ATUAL + 1;
+      const matchMes = filtroPeriodo === "todos" || mesPaciente === mesFiltro;
       const matchBusca = !busca || a.nome.toLowerCase().includes(busca.toLowerCase());
       return matchMes && matchBusca;
     });
-  }, [filtroPeriodo, busca]);
+  }, [aniversariantes, filtroPeriodo, busca, MES_ATUAL]);
 
   const toggleSelecionado = (id: string) => {
     setSelecionados(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
@@ -318,66 +324,82 @@ function AbaAniversariantes() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-slate-50/60">
-              <th className="w-10 py-2.5 pl-4 text-left">
-                <button onClick={toggleTodos}>
-                  {selecionados.length === filtrados.length && filtrados.length > 0
-                    ? <CheckSquare className="w-4 h-4 text-violet-600" />
-                    : <Square className="w-4 h-4 text-slate-300" />}
-                </button>
-              </th>
-              {["Nome", "Aniversário", "Telefone", "E-mail", "Ações"].map((h) => (
-                <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filtrados.length === 0 ? (
-              <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-400">Nenhum aniversariante encontrado.</td></tr>
-            ) : filtrados.map((a) => (
-              <tr key={a.id} className={cn("hover:bg-slate-50/40 transition-colors", selecionados.includes(a.id) && "bg-violet-50/30")}>
-                <td className="pl-4 py-3">
-                  <button onClick={() => toggleSelecionado(a.id)}>
-                    {selecionados.includes(a.id)
+        {loading ? (
+          <div className="p-4 space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-slate-50/60">
+                <th className="w-10 py-2.5 pl-4 text-left">
+                  <button onClick={toggleTodos}>
+                    {selecionados.length === filtrados.length && filtrados.length > 0
                       ? <CheckSquare className="w-4 h-4 text-violet-600" />
                       : <Square className="w-4 h-4 text-slate-300" />}
                   </button>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 text-xs font-bold shrink-0">
-                      {a.nome.split(" ").map(n => n[0]).slice(0, 2).join("")}
-                    </div>
-                    <span className="font-medium text-slate-800 text-sm">{a.nome}</span>
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg">{a.dia === new Date().getDate() && a.mes === new Date().getMonth() + 1 ? "🎂" : "🎁"}</span>
-                    <div>
-                      <p className="text-xs font-semibold text-slate-800">{a.dia} de {MESES_PT[a.mes - 1]}</p>
-                      <p className="text-[10px] text-slate-400">{a.dataNascimento.split("/")[2]} anos</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-xs text-slate-600">{a.telefone}</td>
-                <td className="px-4 py-3 text-xs text-slate-500">{a.email}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
-                      <MessageCircle className="w-3 h-3" />WhatsApp
-                    </Button>
-                    <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 text-blue-600 border-blue-200 hover:bg-blue-50">
-                      <Mail className="w-3 h-3" />E-mail
-                    </Button>
-                  </div>
-                </td>
+                </th>
+                {["Nome", "Aniversário", "Telefone", "E-mail", "Ações"].map((h) => (
+                  <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtrados.length === 0 ? (
+                <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-400">Nenhum aniversariante encontrado.</td></tr>
+              ) : filtrados.map((a) => {
+                const dn = a.dataNascimento ? new Date(a.dataNascimento) : null;
+                const dia = a.diaNascimento;
+                const mes = dn ? dn.getMonth() + 1 : null;
+                const anoNasc = dn ? dn.getFullYear() : null;
+                const hoje = new Date();
+                const ehHoje = dn && dia === hoje.getDate() && mes === hoje.getMonth() + 1;
+                return (
+                  <tr key={a.id} className={cn("hover:bg-slate-50/40 transition-colors", selecionados.includes(a.id) && "bg-violet-50/30")}>
+                    <td className="pl-4 py-3">
+                      <button onClick={() => toggleSelecionado(a.id)}>
+                        {selecionados.includes(a.id)
+                          ? <CheckSquare className="w-4 h-4 text-violet-600" />
+                          : <Square className="w-4 h-4 text-slate-300" />}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 text-xs font-bold shrink-0">
+                          {a.nome.split(" ").map(n => n[0]).slice(0, 2).join("")}
+                        </div>
+                        <span className="font-medium text-slate-800 text-sm">{a.nome}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-lg">{ehHoje ? "🎂" : "🎁"}</span>
+                        <div>
+                          <p className="text-xs font-semibold text-slate-800">{dia} de {mes ? MESES_PT[mes - 1] : "—"}</p>
+                          <p className="text-[10px] text-slate-400">{anoNasc ? `${hoje.getFullYear() - anoNasc} anos` : "—"}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{a.telefone ?? "—"}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{a.email ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 text-emerald-600 border-emerald-200 hover:bg-emerald-50">
+                          <MessageCircle className="w-3 h-3" />WhatsApp
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 text-blue-600 border-blue-200 hover:bg-blue-50">
+                          <Mail className="w-3 h-3" />E-mail
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <MensagemMassaModal open={modalMensagem} onOpenChange={setModalMensagem} destinatarios={nomeSelecionados} tipo="aniversario" />
@@ -388,22 +410,31 @@ function AbaAniversariantes() {
 // ─── Aba Pacientes Inativos ───────────────────────────────────────────────────
 
 function AbaInativos() {
-  const [filtroInatividade, setFiltroInatividade] = useState("todos");
+  const { toast } = useToast();
+  const [filtroInatividade, setFiltroInatividade] = useState("90");
   const [busca, setBusca] = useState("");
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [modalMensagem, setModalMensagem] = useState(false);
 
+  const [inativos, setInativos] = useState<PacienteInativo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch when filter changes
+  useEffect(() => {
+    setLoading(true);
+    const dias = Number(filtroInatividade === "todos" ? 30 : filtroInatividade);
+    getPacientesInativos(dias)
+      .then(setInativos)
+      .catch(() => toast({ title: "Erro ao carregar pacientes inativos", variant: "destructive" }))
+      .finally(() => setLoading(false));
+  }, [filtroInatividade]);
+
   const filtrados = useMemo(() => {
-    return INATIVOS_MOCK.filter((p) => {
+    return inativos.filter((p) => {
       const matchBusca = !busca || p.nome.toLowerCase().includes(busca.toLowerCase());
-      const matchDias = filtroInatividade === "todos"
-        || (filtroInatividade === "30" && p.diasInativo >= 30 && p.diasInativo < 60)
-        || (filtroInatividade === "60" && p.diasInativo >= 60 && p.diasInativo < 90)
-        || (filtroInatividade === "90" && p.diasInativo >= 90 && p.diasInativo < 180)
-        || (filtroInatividade === "180" && p.diasInativo >= 180);
-      return matchBusca && matchDias;
+      return matchBusca;
     });
-  }, [filtroInatividade, busca]);
+  }, [inativos, busca]);
 
   const toggleSel = (id: string) => setSelecionados(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
   const toggleTodos = () => setSelecionados(s => s.length === filtrados.length ? [] : filtrados.map(p => p.id));
@@ -417,11 +448,11 @@ function AbaInativos() {
             <SelectValue placeholder="Sem visita há..." />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="todos">Todos</SelectItem>
-            <SelectItem value="30">30 a 60 dias</SelectItem>
-            <SelectItem value="60">60 a 90 dias</SelectItem>
-            <SelectItem value="90">90 a 180 dias</SelectItem>
-            <SelectItem value="180">Mais de 180 dias</SelectItem>
+            <SelectItem value="todos">Todos (30+ dias)</SelectItem>
+            <SelectItem value="30">30+ dias</SelectItem>
+            <SelectItem value="60">60+ dias</SelectItem>
+            <SelectItem value="90">90+ dias</SelectItem>
+            <SelectItem value="180">180+ dias</SelectItem>
           </SelectContent>
         </Select>
         <div className="relative flex-1 min-w-[200px]">
@@ -438,68 +469,80 @@ function AbaInativos() {
       </div>
 
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-slate-50/60">
-              <th className="w-10 py-2.5 pl-4">
-                <button onClick={toggleTodos}>
-                  {selecionados.length === filtrados.length && filtrados.length > 0
-                    ? <CheckSquare className="w-4 h-4 text-violet-600" />
-                    : <Square className="w-4 h-4 text-slate-300" />}
-                </button>
-              </th>
-              {["Nome", "Última visita", "Inatividade", "Telefone", "Ações"].map(h => (
-                <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filtrados.length === 0 ? (
-              <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-400">Nenhum paciente encontrado.</td></tr>
-            ) : filtrados.map((p) => {
-              const cor = p.diasInativo >= 180 ? "text-red-500 bg-red-50 border-red-100"
-                : p.diasInativo >= 90 ? "text-orange-500 bg-orange-50 border-orange-100"
-                : "text-amber-600 bg-amber-50 border-amber-100";
-              return (
-                <tr key={p.id} className={cn("hover:bg-slate-50/40 transition-colors", selecionados.includes(p.id) && "bg-violet-50/30")}>
-                  <td className="pl-4 py-3">
-                    <button onClick={() => toggleSel(p.id)}>
-                      {selecionados.includes(p.id)
-                        ? <CheckSquare className="w-4 h-4 text-violet-600" />
-                        : <Square className="w-4 h-4 text-slate-300" />}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-xs font-bold shrink-0">
-                        {p.nome.split(" ").map(n => n[0]).slice(0, 2).join("")}
+        {loading ? (
+          <div className="p-4 space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-slate-50/60">
+                <th className="w-10 py-2.5 pl-4">
+                  <button onClick={toggleTodos}>
+                    {selecionados.length === filtrados.length && filtrados.length > 0
+                      ? <CheckSquare className="w-4 h-4 text-violet-600" />
+                      : <Square className="w-4 h-4 text-slate-300" />}
+                  </button>
+                </th>
+                {["Nome", "Última visita", "Inatividade", "Telefone", "Ações"].map(h => (
+                  <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtrados.length === 0 ? (
+                <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-400">Nenhum paciente encontrado.</td></tr>
+              ) : filtrados.map((p) => {
+                const dias = p.diasInativo ?? 0;
+                const cor = dias >= 180 ? "text-red-500 bg-red-50 border-red-100"
+                  : dias >= 90 ? "text-orange-500 bg-orange-50 border-orange-100"
+                  : "text-amber-600 bg-amber-50 border-amber-100";
+                const ultimaVisitaStr = p.ultimoAgendamento
+                  ? new Date(p.ultimoAgendamento).toLocaleDateString("pt-BR")
+                  : "Nunca";
+                return (
+                  <tr key={p.id} className={cn("hover:bg-slate-50/40 transition-colors", selecionados.includes(p.id) && "bg-violet-50/30")}>
+                    <td className="pl-4 py-3">
+                      <button onClick={() => toggleSel(p.id)}>
+                        {selecionados.includes(p.id)
+                          ? <CheckSquare className="w-4 h-4 text-violet-600" />
+                          : <Square className="w-4 h-4 text-slate-300" />}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-xs font-bold shrink-0">
+                          {p.nome.split(" ").map(n => n[0]).slice(0, 2).join("")}
+                        </div>
+                        <span className="font-medium text-slate-800 text-sm">{p.nome}</span>
                       </div>
-                      <span className="font-medium text-slate-800 text-sm">{p.nome}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{p.ultimaVisita}</td>
-                  <td className="px-4 py-3">
-                    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border", cor)}>
-                      <Clock className="w-3 h-3" />
-                      {p.diasInativo} dias
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-600">{p.telefone}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 text-violet-600 border-violet-200 hover:bg-violet-50">
-                        <Calendar className="w-3 h-3" />Agendar
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 text-slate-500 hover:bg-slate-50">
-                        <Phone className="w-3 h-3" />Contatar
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{ultimaVisitaStr}</td>
+                    <td className="px-4 py-3">
+                      <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border", cor)}>
+                        <Clock className="w-3 h-3" />
+                        {p.diasInativo !== null ? `${p.diasInativo} dias` : "—"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{p.telefone ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 text-violet-600 border-violet-200 hover:bg-violet-50">
+                          <Calendar className="w-3 h-3" />Agendar
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-[10px] gap-1 text-slate-500 hover:bg-slate-50">
+                          <Phone className="w-3 h-3" />Contatar
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <MensagemMassaModal open={modalMensagem} onOpenChange={setModalMensagem} destinatarios={nomeSel} tipo="reativacao" />
