@@ -1,10 +1,8 @@
 import { NextAuthOptions } from "next-auth";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma) as any,
   providers: [
     CredentialsProvider({
       name: "credentials",
@@ -16,11 +14,20 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) {
           return null;
         }
-        // TODO: implement password verification
-        const user = await prisma.user.findUnique({
+
+        const medico = await prisma.medico.findUnique({
           where: { email: credentials.email },
         });
-        return user ?? null;
+
+        if (!medico) return null;
+
+        // TODO: verificar senha com bcrypt em produção
+        // Por enquanto aceita qualquer senha para desenvolvimento
+        return {
+          id: medico.id,
+          email: medico.email,
+          name: medico.nome,
+        };
       },
     }),
   ],
@@ -30,4 +37,5 @@ export const authOptions: NextAuthOptions = {
   pages: {
     signIn: "/login",
   },
+  secret: process.env.NEXTAUTH_SECRET,
 };
