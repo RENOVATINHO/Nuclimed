@@ -11,7 +11,10 @@
       "Bash(ls \"c:/Users/Polar/.vscode/Nuclimed/app/\\(app\\)/estoque/\")",
       "Bash(ls \"c:\\\\Users\\\\Polar\\\\.vscode\\\\Nuclimed\\\\app\\\\\\(app\\)\\\\mev\")",
       "Bash(ls \"c:\\\\Users\\\\Polar\\\\.vscode\\\\Nuclimed\\\\app\\\\\\(app\\)\\\\mev\\\\avaliacao\")",
-      "Bash(ls \"c:\\\\Users\\\\Polar\\\\.vscode\\\\Nuclimed\\\\app\\\\\\(app\\)\\\\mev\\\\plano\")"
+      "Bash(ls \"c:\\\\Users\\\\Polar\\\\.vscode\\\\Nuclimed\\\\app\\\\\\(app\\)\\\\mev\\\\plano\")",
+      "Bash(npm install:*)",
+      "Bash(npx prisma:*)",
+      "Bash(cat \"c:\\\\Users\\\\Polar\\\\.vscode\\\\Nuclimed\\\\app\\\\\\(app\\)\\\\layout.tsx\")"
     ]
   }
 }

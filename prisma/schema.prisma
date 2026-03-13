@@ -1,142 +1,211 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
+// ─── Valores válidos (documentação — SQLite não suporta enums) ────────────────
+//
+// Medico.foto                → URL string opcional
+//
+// Paciente.sexo              → "MASCULINO" | "FEMININO" | "OUTRO"
+// Paciente.estadoCivil       → "SOLTEIRO" | "CASADO" | "DIVORCIADO" | "VIUVO" | "UNIAO_ESTAVEL"
+// Paciente.status            → "ATIVO" | "INATIVO"
+//
+// Agendamento.tipo           → "CONSULTA" | "RETORNO" | "PROCEDIMENTO" | "CIRURGIA" | "EXAME"
+// Agendamento.status         → "AGENDADO" | "FINALIZADO" | "CANCELADO" | "RETORNO" | "ESPERA"
+//
+// Consulta.modalidade        → "PRESENCIAL" | "TELEMEDICINA"
+// Consulta.status            → "RASCUNHO" | "FINALIZADO"
+//
+// MensagemChat.role          → "USER" | "ASSISTANT"
+//
+// Transacao.tipo             → "RECEITA" | "DESPESA"
+// Transacao.status           → "PENDENTE" | "PAGO" | "CANCELADO"
+// Transacao.formaPagamento   → "DINHEIRO" | "PIX" | "CARTAO" | "CONVENIO" | "BOLETO"
+//
+// MovimentacaoEstoque.tipo   → "ENTRADA" | "SAIDA"
+// ─────────────────────────────────────────────────────────────────────────────
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-}
-
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  clinica       Clinica?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-}
-
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-
-  @@unique([identifier, token])
-}
-
-model Clinica {
-  id        String   @id @default(cuid())
-  nome      String
-  cnpj      String?
-  telefone  String?
-  email     String?
-  endereco  String?
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
-  pacientes Paciente[]
-  consultas Consulta[]
-  agendamentos Agendamento[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model Medico {
+  id            String            @id @default(cuid())
+  nome          String
+  email         String            @unique
+  senha         String
+  crm           String            @unique
+  especialidade String
+  telefone      String?
+  foto          String?
+  pacientes     Paciente[]
+  agendamentos  Agendamento[]
+  consultas     Consulta[]
+  modelos       ModeloDocumento[]
+  mensagens     MensagemChat[]
+  transacoes    Transacao[]
+  produtos      ProdutoEstoque[]
+  avaliacoesMev AvaliacaoMEV[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
 }
 
 model Paciente {
+  id             String         @id @default(cuid())
+  nome           String
+  cpf            String?        @unique
+  email          String?
+  telefone       String?
+  dataNascimento DateTime?
+  sexo           String? // MASCULINO | FEMININO | OUTRO
+  estadoCivil    String? // SOLTEIRO | CASADO | DIVORCIADO | VIUVO | UNIAO_ESTAVEL
+  naturalidade   String?
+  cidade         String?
+  endereco       String?
+  convenio       String?
+  tipoSanguineo  String?
+  alergias       String?
+  observacoes    String?
+  status         String         @default("ATIVO") // ATIVO | INATIVO
+  medicoId       String
+  medico         Medico         @relation(fields: [medicoId], references: [id])
+  agendamentos   Agendamento[]
+  consultas      Consulta[]
+  transacoes     Transacao[]
+  avaliacoesMev  AvaliacaoMEV[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model Agendamento {
   id          String   @id @default(cuid())
-  nome        String
-  cpf         String?
-  dataNasc    DateTime?
-  telefone    String?
-  email       String?
-  endereco    String?
-  clinicaId   String
-  clinica     Clinica  @relation(fields: [clinicaId], references: [id])
-  consultas   Consulta[]
-  agendamentos Agendamento[]
-  avaliacoesMev AvaliacaoMev[]
+  pacienteId  String
+  medicoId    String
+  dataHora    DateTime
+  duracao     Int // minutos
+  tipo        String   @default("CONSULTA") // CONSULTA | RETORNO | PROCEDIMENTO | CIRURGIA | EXAME
+  status      String   @default("AGENDADO") // AGENDADO | FINALIZADO | CANCELADO | RETORNO | ESPERA
+  convenio    String?
+  valor       Float?
+  observacoes String?
+  paciente    Paciente @relation(fields: [pacienteId], references: [id])
+  medico      Medico   @relation(fields: [medicoId], references: [id])
+  consulta    Consulta?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
 
 model Consulta {
-  id          String   @id @default(cuid())
-  data        DateTime
-  observacoes String?  @db.Text
-  status      String   @default("AGENDADA")
-  pacienteId  String
-  clinicaId   String
-  paciente    Paciente @relation(fields: [pacienteId], references: [id])
-  clinica     Clinica  @relation(fields: [clinicaId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String           @id @default(cuid())
+  pacienteId    String
+  medicoId      String
+  agendamentoId String?          @unique
+  modalidade    String           @default("PRESENCIAL") // PRESENCIAL | TELEMEDICINA
+  modeloId      String?
+  transcricao   String?
+  anamnese      String? // JSON serializado
+  duracao       Int? // segundos
+  status        String           @default("RASCUNHO") // RASCUNHO | FINALIZADO
+  paciente      Paciente         @relation(fields: [pacienteId], references: [id])
+  medico        Medico           @relation(fields: [medicoId], references: [id])
+  agendamento   Agendamento?     @relation(fields: [agendamentoId], references: [id])
+  modelo        ModeloDocumento? @relation(fields: [modeloId], references: [id])
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 }
 
-model Agendamento {
-  id         String   @id @default(cuid())
-  data       DateTime
-  status     String   @default("PENDENTE")
-  tipo       String?
-  pacienteId String
-  clinicaId  String
-  paciente   Paciente @relation(fields: [pacienteId], references: [id])
-  clinica    Clinica  @relation(fields: [clinicaId], references: [id])
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+model ModeloDocumento {
+  id            String     @id @default(cuid())
+  nome          String
+  descricao     String?
+  conteudo      String // markdown com campos {{variavel}}
+  especialidade String?
+  usos          Int        @default(0)
+  medicoId      String?
+  padrao        Boolean    @default(false)
+  medico        Medico?    @relation(fields: [medicoId], references: [id])
+  consultas     Consulta[]
+  createdAt     DateTime   @default(now())
 }
 
-model AvaliacaoMev {
-  id         String   @id @default(cuid())
-  data       DateTime @default(now())
-  peso       Float?
-  altura     Float?
-  imc        Float?
-  observacoes String? @db.Text
-  pacienteId String
-  paciente   Paciente @relation(fields: [pacienteId], references: [id])
-  planoMev   PlanoMev?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+model MensagemChat {
+  id        String   @id @default(cuid())
+  medicoId  String
+  conversa  String // ID do grupo/thread
+  role      String // USER | ASSISTANT
+  conteudo  String
+  medico    Medico   @relation(fields: [medicoId], references: [id])
+  createdAt DateTime @default(now())
 }
 
-model PlanoMev {
-  id           String       @id @default(cuid())
-  titulo       String
-  descricao    String?      @db.Text
-  avaliacaoId  String       @unique
-  avaliacao    AvaliacaoMev @relation(fields: [avaliacaoId], references: [id])
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+model Transacao {
+  id             String    @id @default(cuid())
+  medicoId       String
+  pacienteId     String?
+  descricao      String
+  categoria      String
+  tipo           String // RECEITA | DESPESA
+  valor          Float
+  desconto       Float     @default(0)
+  multa          Float     @default(0)
+  valorLiquido   Float
+  formaPagamento String // DINHEIRO | PIX | CARTAO | CONVENIO | BOLETO
+  status         String    @default("PENDENTE") // PENDENTE | PAGO | CANCELADO
+  dataEmissao    DateTime
+  dataBaixa      DateTime?
+  observacoes    String?
+  medico         Medico    @relation(fields: [medicoId], references: [id])
+  paciente       Paciente? @relation(fields: [pacienteId], references: [id])
+  createdAt      DateTime  @default(now())
+}
+
+model ProdutoEstoque {
+  id            String                @id @default(cuid())
+  medicoId      String
+  nome          String
+  categoria     String
+  unidade       String
+  estoqueAtual  Int                   @default(0)
+  estoqueMinimo Int                   @default(0)
+  validade      DateTime?
+  medico        Medico                @relation(fields: [medicoId], references: [id])
+  movimentacoes MovimentacaoEstoque[]
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+}
+
+model MovimentacaoEstoque {
+  id          String         @id @default(cuid())
+  produtoId   String
+  tipo        String // ENTRADA | SAIDA
+  quantidade  Int
+  responsavel String?
+  observacoes String?
+  produto     ProdutoEstoque @relation(fields: [produtoId], references: [id])
+  createdAt   DateTime       @default(now())
+}
+
+model AvaliacaoMEV {
+  id             String   @id @default(cuid())
+  pacienteId     String
+  medicoId       String
+  peso           Float?
+  altura         Float?
+  imc            Float?
+  circAbdominal  Float?
+  comorbidades   String? // JSON array
+  indicadoresLab String? // JSON object
+  respostas      String? // JSON — respostas por pilar
+  scorePilar1    Float    @default(0) // Nutrição
+  scorePilar2    Float    @default(0) // Atividade Física
+  scorePilar3    Float    @default(0) // Sono
+  scorePilar4    Float    @default(0) // Controle de Tóxicos
+  scorePilar5    Float    @default(0) // Saúde Mental
+  scorePilar6    Float    @default(0) // Conexões Sociais
+  riscos         String? // JSON array
+  planoAcao      String? // JSON array de metas
+  paciente       Paciente @relation(fields: [pacienteId], references: [id])
+  medico         Medico   @relation(fields: [medicoId], references: [id])
+  createdAt      DateTime @default(now())
 }
